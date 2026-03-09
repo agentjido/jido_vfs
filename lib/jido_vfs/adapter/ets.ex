@@ -249,7 +249,7 @@ defmodule Jido.VFS.Adapter.ETS do
         {:ok, binary} ->
           stream =
             Stream.unfold(binary, fn
-              <<chunk::binary-size(chunk_size), rest::binary>> -> {chunk, rest}
+              <<chunk::binary-size(^chunk_size), rest::binary>> -> {chunk, rest}
               <<>> -> nil
               rest -> {rest, <<>>}
             end)
