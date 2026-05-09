@@ -1,6 +1,28 @@
 defmodule Jido.VFS.ErrorsTest do
   use ExUnit.Case, async: true
-  doctest Jido.VFS.Errors
+  doctest Jido.VFS.Errors, except: [traverse_errors: 2]
+
+  describe "traverse_errors/2" do
+    test "groups error messages by path" do
+      errors = [
+        %Jido.VFS.Errors.InvalidPath{
+          invalid_path: "name",
+          reason: "is required",
+          path: [:name]
+        },
+        %Jido.VFS.Errors.InvalidPath{
+          invalid_path: "user/email",
+          reason: "is invalid",
+          path: [:user, :email]
+        }
+      ]
+
+      assert Jido.VFS.Errors.traverse_errors(errors, &Exception.message/1) == %{
+               name: ["Invalid path name: is required"],
+               user: %{email: ["Invalid path user/email: is invalid"]}
+             }
+    end
+  end
 
   describe "error class modules" do
     test "Invalid error class" do
