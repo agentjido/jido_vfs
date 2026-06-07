@@ -39,3 +39,7 @@
 - Use `@spec` type annotations for public functions
 - Test with ExUnit, use `assert_in_list/2` macro for list assertions
 - Group related tests in `describe` blocks with setup context
+
+## Release Hygiene
+
+- Do not modify `CHANGELOG.md`; release notes are generated from Git history during release, so keep changes focused on proper Conventional Commits.
