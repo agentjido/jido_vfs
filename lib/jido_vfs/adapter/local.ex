@@ -110,9 +110,19 @@ defmodule Jido.VFS.Adapter.Local do
 
   @impl Jido.VFS.Adapter
   def write_stream(%Config{} = config, path, opts) do
+    path = full_path(config, path)
     modes = opts[:modes] || []
     line_or_bytes = opts[:chunk_size] || :line
-    {:ok, File.stream!(full_path(config, path), modes, line_or_bytes)}
+
+    with :ok <- ensure_directory(config, Path.dirname(path), opts) do
+      {:ok, File.stream!(path, line_or_bytes, modes)}
+    else
+      {:error, reason} when is_atom(reason) ->
+        {:error, convert_file_error(reason, path)}
+
+      {:error, %{__struct__: _} = error} ->
+        {:error, error}
+    end
   rescue
     e -> {:error, convert_exception_error(e, full_path(config, path))}
   end
@@ -129,7 +139,7 @@ defmodule Jido.VFS.Adapter.Local do
   def read_stream(%Config{} = config, path, opts) do
     modes = opts[:modes] || []
     line_or_bytes = opts[:chunk_size] || :line
-    {:ok, File.stream!(full_path(config, path), modes, line_or_bytes)}
+    {:ok, File.stream!(full_path(config, path), line_or_bytes, modes)}
   rescue
     e -> {:error, convert_exception_error(e, full_path(config, path))}
   end

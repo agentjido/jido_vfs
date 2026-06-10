@@ -168,12 +168,21 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def read_stream(config, path, opts) do
-    {:ok,
-     %AgentStream{
-       config: config,
-       path: path,
-       chunk_size: Keyword.get(opts, :chunk_size, 1024)
-     }}
+    case file_exists(config, path) do
+      {:ok, :exists} ->
+        {:ok,
+         %AgentStream{
+           config: config,
+           path: path,
+           chunk_size: Keyword.get(opts, :chunk_size, 1024)
+         }}
+
+      {:ok, :missing} ->
+        {:error, Errors.FileNotFound.exception(file_path: path)}
+
+      {:error, _} = error ->
+        error
+    end
   end
 
   @impl Jido.VFS.Adapter

@@ -56,6 +56,17 @@ defmodule Jido.VFS.Adapter.LocalTest do
       assert {:ok, "Hello World"} = File.read(Path.join(prefix, "test.txt"))
     end
 
+    test "stream creates missing parent directories", %{tmp_dir: prefix} do
+      {_, config} = Jido.VFS.Adapter.Local.configure(prefix: prefix)
+
+      assert {:ok, %File.Stream{} = stream} =
+               Jido.VFS.Adapter.Local.write_stream(config, "nested/stream.txt", [])
+
+      Enum.into(["Hello", " ", "World"], stream)
+
+      assert {:ok, "Hello World"} = File.read(Path.join(prefix, "nested/stream.txt"))
+    end
+
     test "default visibility", %{tmp_dir: prefix} do
       {_, config} = Jido.VFS.Adapter.Local.configure(prefix: prefix)
 

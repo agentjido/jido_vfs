@@ -300,6 +300,68 @@ defmodule JidoVFSTest do
       assert_in_list list, %Jido.VFS.Stat.File{name: "test.txt"}
       assert_in_list list, %Jido.VFS.Stat.File{name: "test-1.txt"}
     end
+
+    test "module wrapper exposes the full public filesystem API", %{tmp_dir: prefix} do
+      defmodule Local.FullApiTest do
+        use Jido.VFS.Filesystem,
+          adapter: Jido.VFS.Adapter.Local,
+          prefix: prefix
+      end
+
+      expected_exports = [
+        write_stream: 1,
+        write_stream: 2,
+        create_directory: 1,
+        create_directory: 2,
+        delete_directory: 1,
+        delete_directory: 2,
+        clear: 0,
+        clear: 1,
+        set_visibility: 2,
+        visibility: 1,
+        stat: 1,
+        access: 2,
+        append: 2,
+        append: 3,
+        truncate: 2,
+        utime: 2,
+        commit: 0,
+        commit: 1,
+        commit: 2,
+        revisions: 0,
+        revisions: 1,
+        revisions: 2,
+        read_revision: 2,
+        read_revision: 3,
+        rollback: 1,
+        rollback: 2
+      ]
+
+      for {function, arity} <- expected_exports do
+        assert function_exported?(Local.FullApiTest, function, arity)
+      end
+
+      assert {:ok, stream} = Local.FullApiTest.write_stream("nested/stream.txt")
+      Enum.into(["Hello", " ", "World"], stream)
+      assert {:ok, "Hello World"} = Local.FullApiTest.read("nested/stream.txt")
+
+      assert :ok = Local.FullApiTest.create_directory("empty/")
+      assert {:ok, %Jido.VFS.Stat.Dir{}} = Local.FullApiTest.stat("empty/")
+      assert :ok = Local.FullApiTest.delete_directory("empty/")
+
+      assert :ok = Local.FullApiTest.append("append.txt", "ab")
+      assert {:ok, "ab"} = Local.FullApiTest.read("append.txt")
+      assert :ok = Local.FullApiTest.truncate("append.txt", 1)
+      assert :ok = Local.FullApiTest.access("append.txt", [:read])
+      assert :ok = Local.FullApiTest.set_visibility("append.txt", :private)
+      assert {:ok, :private} = Local.FullApiTest.visibility("append.txt")
+
+      assert {:error, %Jido.VFS.Errors.UnsupportedOperation{operation: :commit}} =
+               Local.FullApiTest.commit()
+
+      assert :ok = Local.FullApiTest.clear()
+      assert {:ok, :missing} = Local.FullApiTest.file_exists("append.txt")
+    end
   end
 
   describe "filesystem with own processes" do

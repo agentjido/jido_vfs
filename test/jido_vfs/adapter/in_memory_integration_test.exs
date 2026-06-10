@@ -339,9 +339,8 @@ defmodule Jido.VFS.Adapter.InMemoryIntegrationTest do
       assert result == ["1", "2"]
     end
 
-    test "stream for non-existent file returns empty", %{filesystem: fs} do
-      assert {:ok, stream} = Jido.VFS.read_stream(fs, "missing.txt")
-      assert Enum.to_list(stream) == []
+    test "stream for non-existent file returns typed error", %{filesystem: fs} do
+      assert {:error, %Jido.VFS.Errors.FileNotFound{}} = Jido.VFS.read_stream(fs, "missing.txt")
     end
 
     test "stream count fallback works", %{filesystem: fs} do
