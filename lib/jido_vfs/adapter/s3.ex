@@ -374,6 +374,9 @@ defmodule Jido.VFS.Adapter.S3 do
     else
       {:ok, :missing} ->
         {:error, %Errors.FileNotFound{file_path: path}}
+
+      {:error, _} = error ->
+        error
     end
   end
 

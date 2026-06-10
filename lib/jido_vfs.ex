@@ -854,7 +854,8 @@ defmodule Jido.VFS do
 
   # Same adapter, same config -> just do a plain copy
   def copy_between_filesystem({filesystem, source}, {filesystem, destination}, opts) do
-    with {:ok, _strategy} <- copy_between_strategy_from_opts(opts) do
+    with {:ok, _strategy} <- copy_between_strategy_from_opts(opts),
+         {:ok, _chunk_size} <- copy_between_chunk_size_from_opts(opts) do
       copy(filesystem, source, destination, copy_between_runtime_opts(opts))
     end
   end
@@ -925,15 +926,21 @@ defmodule Jido.VFS do
   end
 
   defp copy_between_with_strategy(source, destination, :stream, opts) do
-    copy_via_stream(source, destination, copy_between_runtime_opts(opts))
+    copy_via_stream(source, destination, opts)
   end
 
   defp copy_between_with_strategy(source, destination, :tempfile, opts) do
-    copy_via_tempfile(source, destination, Keyword.delete(opts, :copy_between_strategy))
+    copy_via_tempfile(source, destination, opts)
   end
 
   defp copy_between_runtime_opts(opts) do
-    Keyword.drop(opts, [:copy_between_strategy, :copy_between_temp_dir])
+    Keyword.drop(opts, [:copy_between_strategy, :copy_between_temp_dir, :chunk_size])
+  end
+
+  defp copy_between_stream_opts(opts, chunk_size) do
+    opts
+    |> copy_between_runtime_opts()
+    |> Keyword.put(:chunk_size, chunk_size)
   end
 
   defp copy_between_strategy_from_opts(opts) do
@@ -959,17 +966,18 @@ defmodule Jido.VFS do
          {destination_filesystem, destination_path},
          opts
        ) do
-    chunk_size = normalize_copy_chunk_size(Keyword.get(opts, :chunk_size, 64 * 1024))
-    adapter_opts = Keyword.drop(opts, [:copy_between_temp_dir])
-    stream_opts = Keyword.put(adapter_opts, :chunk_size, chunk_size)
+    adapter_opts = copy_between_runtime_opts(opts)
 
-    with {:ok, chunks} <- source_copy_chunks(source_filesystem, source_path, stream_opts, chunk_size),
+    with {:ok, chunk_size} <- copy_between_chunk_size_from_opts(opts),
+         stream_opts = copy_between_stream_opts(opts, chunk_size),
+         {:ok, chunks} <- source_copy_chunks(source_filesystem, source_path, stream_opts, chunk_size),
          :ok <-
            write_copy_chunks_to_destination(
              destination_filesystem,
              destination_path,
              chunks,
              stream_opts,
+             adapter_opts,
              chunk_size
            ) do
       :ok
@@ -990,10 +998,18 @@ defmodule Jido.VFS do
     end
   end
 
-  defp write_copy_chunks_to_destination(destination_filesystem, destination_path, chunks, opts, _chunk_size) do
+  defp write_copy_chunks_to_destination(
+         destination_filesystem,
+         destination_path,
+         chunks,
+         stream_opts,
+         adapter_opts,
+         _chunk_size
+       ) do
     cond do
       supports?(destination_filesystem, :write_stream) ->
-        with {:ok, write_stream} <- open_destination_write_stream(destination_filesystem, destination_path, opts) do
+        with {:ok, write_stream} <-
+               open_destination_write_stream(destination_filesystem, destination_path, stream_opts, adapter_opts) do
           try do
             Enum.into(chunks, write_stream)
             :ok
@@ -1010,10 +1026,10 @@ defmodule Jido.VFS do
         end
 
       supports?(destination_filesystem, :append) ->
-        with :ok <- Jido.VFS.write(destination_filesystem, destination_path, "", opts) do
+        with :ok <- Jido.VFS.write(destination_filesystem, destination_path, "", adapter_opts) do
           try do
             Enum.reduce_while(chunks, :ok, fn chunk, :ok ->
-              case Jido.VFS.append(destination_filesystem, destination_path, chunk, opts) do
+              case Jido.VFS.append(destination_filesystem, destination_path, chunk, adapter_opts) do
                 :ok -> {:cont, :ok}
                 {:error, reason} -> {:halt, copy_side_error(:destination, destination_path, reason)}
               end
@@ -1037,7 +1053,7 @@ defmodule Jido.VFS do
             |> Enum.reduce([], fn chunk, acc -> [acc, chunk] end)
             |> IO.iodata_to_binary()
 
-          case Jido.VFS.write(destination_filesystem, destination_path, contents, opts) do
+          case Jido.VFS.write(destination_filesystem, destination_path, contents, adapter_opts) do
             :ok -> :ok
             {:error, reason} -> copy_side_error(:destination, destination_path, reason)
           end
@@ -1056,11 +1072,13 @@ defmodule Jido.VFS do
          {destination_filesystem, destination_path},
          opts
        ) do
-    chunk_size = normalize_copy_chunk_size(Keyword.get(opts, :chunk_size, 64 * 1024))
     temp_dir = Keyword.get(opts, :copy_between_temp_dir, System.tmp_dir!())
-    adapter_opts = Keyword.drop(opts, [:copy_between_temp_dir])
+    adapter_opts = copy_between_runtime_opts(opts)
 
-    with :ok <- ensure_copy_temp_dir(temp_dir) do
+    with {:ok, chunk_size} <- copy_between_chunk_size_from_opts(opts),
+         :ok <- ensure_copy_temp_dir(temp_dir) do
+      stream_opts = copy_between_stream_opts(opts, chunk_size)
+
       temp_path =
         Path.join(
           temp_dir,
@@ -1069,13 +1087,14 @@ defmodule Jido.VFS do
 
       try do
         with :ok <-
-               copy_source_into_tempfile(source_filesystem, source_path, temp_path, adapter_opts, chunk_size),
+               copy_source_into_tempfile(source_filesystem, source_path, temp_path, stream_opts, chunk_size),
              :ok <-
                copy_tempfile_into_destination(
                  destination_filesystem,
                  destination_path,
                  temp_path,
                  adapter_opts,
+                 stream_opts,
                  chunk_size
                ) do
           :ok
@@ -1109,8 +1128,22 @@ defmodule Jido.VFS do
     end
   end
 
-  defp normalize_copy_chunk_size(size) when is_integer(size) and size > 0, do: size
-  defp normalize_copy_chunk_size(_), do: 64 * 1024
+  defp copy_between_chunk_size_from_opts(opts) do
+    case Keyword.get(opts, :chunk_size, 64 * 1024) do
+      size when is_integer(size) and size > 0 ->
+        {:ok, size}
+
+      size ->
+        {:error,
+         Errors.AdapterError.exception(
+           adapter: __MODULE__,
+           reason: %{
+             operation: :copy_between_filesystem,
+             reason: {:invalid_chunk_size, size}
+           }
+         )}
+    end
+  end
 
   defp normalize_copy_paths(source_path, destination_path) do
     case Jido.VFS.RelativePath.normalize(source_path) do
@@ -1165,6 +1198,7 @@ defmodule Jido.VFS do
          destination_path,
          temp_path,
          opts,
+         stream_opts,
          chunk_size
        ) do
     if supports?(destination_filesystem, :write_stream) do
@@ -1172,7 +1206,8 @@ defmodule Jido.VFS do
              open_destination_write_stream(
                destination_filesystem,
                destination_path,
-               Keyword.put(opts, :chunk_size, chunk_size)
+               stream_opts,
+               opts
              ) do
         try do
           temp_path
@@ -1249,9 +1284,9 @@ defmodule Jido.VFS do
     end
   end
 
-  defp open_destination_write_stream(destination_filesystem, destination_path, opts) do
-    with :ok <- ensure_destination_write_target(destination_filesystem, destination_path, opts),
-         {:ok, write_stream} <- Jido.VFS.write_stream(destination_filesystem, destination_path, opts) do
+  defp open_destination_write_stream(destination_filesystem, destination_path, stream_opts, adapter_opts) do
+    with :ok <- ensure_destination_write_target(destination_filesystem, destination_path, adapter_opts),
+         {:ok, write_stream} <- Jido.VFS.write_stream(destination_filesystem, destination_path, stream_opts) do
       {:ok, write_stream}
     end
   end
@@ -1275,14 +1310,22 @@ defmodule Jido.VFS do
   @doc false
   # Also used by the InMemory adapter and therefore not private
   @spec chunk(binary(), pos_integer()) :: [binary()]
-  def chunk("", _size), do: []
-
-  def chunk(binary, size) when byte_size(binary) >= size do
-    {chunk, rest} = :erlang.split_binary(binary, size)
-    [chunk | chunk(rest, size)]
+  def chunk(binary, size) when is_integer(size) and size > 0 do
+    do_chunk(binary, size)
   end
 
-  def chunk(binary, _size), do: [binary]
+  def chunk(_binary, size) do
+    raise ArgumentError, "chunk size must be a positive integer, got: #{inspect(size)}"
+  end
+
+  defp do_chunk("", _size), do: []
+
+  defp do_chunk(binary, size) when byte_size(binary) >= size do
+    {chunk, rest} = :erlang.split_binary(binary, size)
+    [chunk | do_chunk(rest, size)]
+  end
+
+  defp do_chunk(binary, _size), do: [binary]
 
   defp normalize_revision_result({:ok, revisions}) when is_list(revisions) do
     {:ok, Enum.map(revisions, &to_revision_struct/1)}

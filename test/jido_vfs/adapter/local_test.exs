@@ -111,6 +111,7 @@ defmodule Jido.VFS.Adapter.LocalTest do
 
     test "stream options", %{tmp_dir: prefix} do
       {_, config} = Jido.VFS.Adapter.Local.configure(prefix: prefix)
+      :ok = File.write(Path.join(prefix, "test.txt"), "Hello World")
 
       assert {:ok, %File.Stream{line_or_bytes: :line, modes: [:raw, :read_ahead, :binary]}} =
                Jido.VFS.Adapter.Local.read_stream(config, "test.txt", [])
@@ -131,6 +132,13 @@ defmodule Jido.VFS.Adapter.LocalTest do
                Jido.VFS.Adapter.Local.read_stream(config, "test.txt", [])
 
       assert Enum.into(stream, <<>>) == "Hello World"
+    end
+
+    test "stream for non-existent file returns typed error", %{tmp_dir: prefix} do
+      {_, config} = Jido.VFS.Adapter.Local.configure(prefix: prefix)
+
+      assert {:error, %Jido.VFS.Errors.FileNotFound{}} =
+               Jido.VFS.Adapter.Local.read_stream(config, "missing.txt", [])
     end
   end
 

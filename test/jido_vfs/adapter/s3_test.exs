@@ -55,6 +55,37 @@ defmodule Jido.VFS.Adapter.S3Test do
       assert {:ok, :missing} = Jido.VFS.file_exists(filesystem_a, "empty/")
       assert {:ok, :exists} = Jido.VFS.file_exists(filesystem_b, "empty/")
     end
+
+    test "root list_contents only returns entries under configured prefix", %{config: config} do
+      filesystem_a = Jido.VFS.Adapter.S3.configure(config: config, bucket: "default", prefix: "list_a")
+      filesystem_b = Jido.VFS.Adapter.S3.configure(config: config, bucket: "default", prefix: "list_b")
+
+      :ok = Jido.VFS.write(filesystem_a, "a.txt", "A")
+      :ok = Jido.VFS.write(filesystem_b, "b.txt", "B")
+
+      assert {:ok, contents_a} = Jido.VFS.list_contents(filesystem_a, ".")
+      assert {:ok, contents_b} = Jido.VFS.list_contents(filesystem_b, ".")
+
+      assert Enum.map(contents_a, & &1.name) == ["a.txt"]
+      assert Enum.map(contents_b, & &1.name) == ["b.txt"]
+    end
+
+    test "native copy_between_filesystem honors source and destination prefixes", %{config: config} do
+      filesystem_a = Jido.VFS.Adapter.S3.configure(config: config, bucket: "default", prefix: "copy_a")
+      filesystem_b = Jido.VFS.Adapter.S3.configure(config: config, bucket: "default", prefix: "copy_b")
+
+      :ok = Jido.VFS.write(filesystem_a, "source.txt", "prefixed copy")
+
+      assert :ok =
+               Jido.VFS.copy_between_filesystem(
+                 {filesystem_a, "source.txt"},
+                 {filesystem_b, "copied.txt"},
+                 copy_between_strategy: :native
+               )
+
+      assert {:ok, "prefixed copy"} = Jido.VFS.read(filesystem_b, "copied.txt")
+      assert {:error, %Jido.VFS.Errors.FileNotFound{}} = Jido.VFS.read(filesystem_b, "source.txt")
+    end
   end
 
   describe "cross bucket" do

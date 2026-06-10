@@ -574,12 +574,8 @@ defmodule Jido.VFS.Adapter.LocalIntegrationTest do
       assert :ok = Jido.VFS.delete(fs, "partial.txt")
     end
 
-    test "stream on missing file raises on enumeration", %{filesystem: fs} do
-      {:ok, stream} = Jido.VFS.read_stream(fs, "missing.txt")
-
-      assert_raise File.Error, fn ->
-        Enum.into(stream, <<>>)
-      end
+    test "stream on missing file returns typed error", %{filesystem: fs} do
+      assert {:error, %Jido.VFS.Errors.FileNotFound{}} = Jido.VFS.read_stream(fs, "missing.txt")
     end
   end
 
