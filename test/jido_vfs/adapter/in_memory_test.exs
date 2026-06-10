@@ -132,15 +132,13 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       assert Enum.member?(stream, "Hello") == true
     end
 
-    test "stream for non-existent file returns empty", %{test: test} do
+    test "stream for non-existent file returns typed error", %{test: test} do
       {_, config} = filesystem = Jido.VFS.Adapter.InMemory.configure(name: test)
 
       start_supervised(filesystem)
 
-      assert {:ok, stream} =
+      assert {:error, %Jido.VFS.Errors.FileNotFound{}} =
                Jido.VFS.Adapter.InMemory.read_stream(config, "missing.txt", [])
-
-      assert Enum.to_list(stream) == []
     end
 
     test "stream suspend and resume functionality", %{test: test} do
@@ -465,6 +463,25 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
                  "missing.txt",
                  DateTime.utc_now()
                )
+    end
+  end
+
+  describe "copy_between_filesystem" do
+    test "stream strategy returns file not found for missing source", %{test: test} do
+      source = Jido.VFS.Adapter.InMemory.configure(name: :"#{test}_source")
+      destination = Jido.VFS.Adapter.InMemory.configure(name: :"#{test}_destination")
+
+      start_supervised!({Jido.VFS.Adapter.InMemory, source}, id: {test, :source})
+      start_supervised!({Jido.VFS.Adapter.InMemory, destination}, id: {test, :destination})
+
+      assert {:error, %Jido.VFS.Errors.FileNotFound{}} =
+               Jido.VFS.copy_between_filesystem(
+                 {source, "missing.txt"},
+                 {destination, "copied.txt"},
+                 copy_between_strategy: :stream
+               )
+
+      assert {:ok, :missing} = Jido.VFS.file_exists(destination, "copied.txt")
     end
   end
 

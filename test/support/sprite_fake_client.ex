@@ -388,13 +388,9 @@ defmodule JidoVfsTest.SpriteFakeClient do
 
     case File.open(path, write_mode) do
       {:ok, io_device} ->
-        result = IO.binwrite(io_device, data)
+        :ok = IO.binwrite(io_device, data)
         File.close(io_device)
-
-        case result do
-          :ok -> {"", 0}
-          {:error, reason} -> {"write error: #{inspect(reason)}\n", 1}
-        end
+        {"", 0}
 
       {:error, :enoent} ->
         {"write error: No such file or directory\n", 1}

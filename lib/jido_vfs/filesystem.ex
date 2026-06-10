@@ -6,7 +6,13 @@ defmodule Jido.VFS.Filesystem do
   @doc """
   Writes contents to the given relative path.
   """
-  @callback write(path :: Path.t(), contents :: binary, opts :: keyword()) :: :ok | {:error, term}
+  @callback write(path :: Path.t(), contents :: iodata(), opts :: keyword()) :: :ok | {:error, term}
+
+  @doc """
+  Opens a writable stream for the given relative path.
+  """
+  @callback write_stream(path :: Path.t(), opts :: keyword()) ::
+              {:ok, Collectable.t()} | {:error, term}
 
   @doc """
   Reads the file at the given relative path.
@@ -47,6 +53,81 @@ defmodule Jido.VFS.Filesystem do
   """
   @callback list_contents(path :: Path.t(), opts :: keyword()) ::
               {:ok, [%Jido.VFS.Stat.Dir{} | %Jido.VFS.Stat.File{}]} | {:error, term}
+
+  @doc """
+  Creates a directory at the given relative path.
+  """
+  @callback create_directory(path :: Path.t(), opts :: keyword()) :: :ok | {:error, term}
+
+  @doc """
+  Deletes a directory at the given relative path.
+  """
+  @callback delete_directory(path :: Path.t(), opts :: keyword()) :: :ok | {:error, term}
+
+  @doc """
+  Clears the configured filesystem.
+  """
+  @callback clear(opts :: keyword()) :: :ok | {:error, term}
+
+  @doc """
+  Sets public/private visibility for the given relative path.
+  """
+  @callback set_visibility(path :: Path.t(), visibility :: Jido.VFS.Visibility.t()) ::
+              :ok | {:error, term}
+
+  @doc """
+  Reads public/private visibility for the given relative path.
+  """
+  @callback visibility(path :: Path.t()) :: {:ok, Jido.VFS.Visibility.t()} | {:error, term}
+
+  @doc """
+  Reads file or directory metadata for the given relative path.
+  """
+  @callback stat(path :: Path.t()) ::
+              {:ok, %Jido.VFS.Stat.File{} | %Jido.VFS.Stat.Dir{}} | {:error, term}
+
+  @doc """
+  Checks access for the given relative path.
+  """
+  @callback access(path :: Path.t(), modes :: [:read | :write]) :: :ok | {:error, term}
+
+  @doc """
+  Appends contents to the given relative path.
+  """
+  @callback append(path :: Path.t(), contents :: iodata(), opts :: keyword()) ::
+              :ok | {:error, term}
+
+  @doc """
+  Truncates the file at the given relative path.
+  """
+  @callback truncate(path :: Path.t(), new_size :: non_neg_integer()) :: :ok | {:error, term}
+
+  @doc """
+  Updates the modification time for the given relative path.
+  """
+  @callback utime(path :: Path.t(), mtime :: DateTime.t()) :: :ok | {:error, term}
+
+  @doc """
+  Commits changes in version-aware filesystems.
+  """
+  @callback commit(message :: String.t() | nil, opts :: keyword()) :: :ok | {:error, term}
+
+  @doc """
+  Lists revisions for a relative path in version-aware filesystems.
+  """
+  @callback revisions(path :: Path.t(), opts :: keyword()) ::
+              {:ok, [Jido.VFS.Revision.t()]} | {:error, term}
+
+  @doc """
+  Reads a file as it existed at a specific revision.
+  """
+  @callback read_revision(path :: Path.t(), revision :: String.t(), opts :: keyword()) ::
+              {:ok, binary()} | {:error, term}
+
+  @doc """
+  Rolls a version-aware filesystem back to a revision.
+  """
+  @callback rollback(revision :: String.t(), opts :: keyword()) :: :ok | {:error, term}
 
   @doc """
   Injects a filesystem wrapper module backed by a configured adapter.
@@ -98,10 +179,18 @@ defmodule Jido.VFS.Filesystem do
       @doc """
       Writes file contents through the configured filesystem.
       """
-      @spec write(Path.t(), binary(), keyword()) :: :ok | {:error, term()}
+      @spec write(Path.t(), iodata(), keyword()) :: :ok | {:error, term()}
       @impl true
       def write(path, contents, opts \\ []),
         do: Jido.VFS.write(__filesystem__(), path, contents, opts)
+
+      @doc """
+      Opens a writable stream through the configured filesystem.
+      """
+      @spec write_stream(Path.t(), keyword()) :: {:ok, Collectable.t()} | {:error, term()}
+      @impl true
+      def write_stream(path, opts \\ []),
+        do: Jido.VFS.write_stream(__filesystem__(), path, opts)
 
       @doc """
       Reads a file through the configured filesystem.
@@ -159,6 +248,119 @@ defmodule Jido.VFS.Filesystem do
       @impl true
       def list_contents(path, opts \\ []),
         do: Jido.VFS.list_contents(__filesystem__(), path, opts)
+
+      @doc """
+      Creates a directory through the configured filesystem.
+      """
+      @spec create_directory(Path.t(), keyword()) :: :ok | {:error, term()}
+      @impl true
+      def create_directory(path, opts \\ []),
+        do: Jido.VFS.create_directory(__filesystem__(), path, opts)
+
+      @doc """
+      Deletes a directory through the configured filesystem.
+      """
+      @spec delete_directory(Path.t(), keyword()) :: :ok | {:error, term()}
+      @impl true
+      def delete_directory(path, opts \\ []),
+        do: Jido.VFS.delete_directory(__filesystem__(), path, opts)
+
+      @doc """
+      Clears the configured filesystem.
+      """
+      @spec clear(keyword()) :: :ok | {:error, term()}
+      @impl true
+      def clear(opts \\ []),
+        do: Jido.VFS.clear(__filesystem__(), opts)
+
+      @doc """
+      Sets visibility through the configured filesystem.
+      """
+      @spec set_visibility(Path.t(), Jido.VFS.Visibility.t()) :: :ok | {:error, term()}
+      @impl true
+      def set_visibility(path, visibility),
+        do: Jido.VFS.set_visibility(__filesystem__(), path, visibility)
+
+      @doc """
+      Reads visibility through the configured filesystem.
+      """
+      @spec visibility(Path.t()) :: {:ok, Jido.VFS.Visibility.t()} | {:error, term()}
+      @impl true
+      def visibility(path),
+        do: Jido.VFS.visibility(__filesystem__(), path)
+
+      @doc """
+      Reads file or directory metadata through the configured filesystem.
+      """
+      @spec stat(Path.t()) ::
+              {:ok, %Jido.VFS.Stat.File{} | %Jido.VFS.Stat.Dir{}} | {:error, term()}
+      @impl true
+      def stat(path),
+        do: Jido.VFS.stat(__filesystem__(), path)
+
+      @doc """
+      Checks access through the configured filesystem.
+      """
+      @spec access(Path.t(), [:read | :write]) :: :ok | {:error, term()}
+      @impl true
+      def access(path, modes),
+        do: Jido.VFS.access(__filesystem__(), path, modes)
+
+      @doc """
+      Appends file contents through the configured filesystem.
+      """
+      @spec append(Path.t(), iodata(), keyword()) :: :ok | {:error, term()}
+      @impl true
+      def append(path, contents, opts \\ []),
+        do: Jido.VFS.append(__filesystem__(), path, contents, opts)
+
+      @doc """
+      Truncates a file through the configured filesystem.
+      """
+      @spec truncate(Path.t(), non_neg_integer()) :: :ok | {:error, term()}
+      @impl true
+      def truncate(path, new_size),
+        do: Jido.VFS.truncate(__filesystem__(), path, new_size)
+
+      @doc """
+      Updates modification time through the configured filesystem.
+      """
+      @spec utime(Path.t(), DateTime.t()) :: :ok | {:error, term()}
+      @impl true
+      def utime(path, mtime),
+        do: Jido.VFS.utime(__filesystem__(), path, mtime)
+
+      @doc """
+      Commits changes through the configured filesystem.
+      """
+      @spec commit(String.t() | nil, keyword()) :: :ok | {:error, term()}
+      @impl true
+      def commit(message \\ nil, opts \\ []),
+        do: Jido.VFS.commit(__filesystem__(), message, opts)
+
+      @doc """
+      Lists revisions through the configured filesystem.
+      """
+      @spec revisions(Path.t(), keyword()) :: {:ok, [Jido.VFS.Revision.t()]} | {:error, term()}
+      @impl true
+      def revisions(path \\ ".", opts \\ []),
+        do: Jido.VFS.revisions(__filesystem__(), path, opts)
+
+      @doc """
+      Reads a file at a revision through the configured filesystem.
+      """
+      @spec read_revision(Path.t(), String.t(), keyword()) :: {:ok, binary()} | {:error, term()}
+      @impl true
+      def read_revision(path, revision, opts \\ []),
+        do: Jido.VFS.read_revision(__filesystem__(), path, revision, opts)
+
+      @doc """
+      Rolls back through the configured filesystem.
+      """
+      @spec rollback(String.t(), keyword()) :: :ok | {:error, term()}
+      @impl true
+      def rollback(revision, opts \\ []),
+        do: Jido.VFS.rollback(__filesystem__(), revision, opts)
     end
   end
 

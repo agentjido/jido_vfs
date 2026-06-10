@@ -30,6 +30,46 @@ defmodule JidoVFSTest do
     def copy(_source_config, _source, _destination_config, _destination, _opts), do: :ok
   end
 
+  defmodule CopyOptionCheckingAdapter do
+    @behaviour Jido.VFS.Adapter
+
+    def starts_processes, do: false
+    def configure(opts), do: {__MODULE__, Map.new(opts)}
+    def unsupported_operations, do: [:read_stream, :write_stream, :append, :copy_between]
+    def versioning_module, do: nil
+
+    def write(%{test_pid: test_pid}, path, contents, opts) do
+      send(test_pid, {:copy_option_write, path, IO.iodata_to_binary(contents), opts})
+
+      if Keyword.has_key?(opts, :chunk_size) do
+        {:error, {:unexpected_chunk_size, opts}}
+      else
+        :ok
+      end
+    end
+
+    def write(_config, _path, _contents, _opts), do: :ok
+    def write_stream(_config, _path, _opts), do: unsupported(:write_stream)
+    def read(%{content: content}, _path), do: {:ok, content}
+    def read(_config, _path), do: {:error, Jido.VFS.Errors.FileNotFound.exception(file_path: "missing")}
+    def read_stream(_config, _path, _opts), do: unsupported(:read_stream)
+    def delete(_config, _path), do: :ok
+    def move(_config, _source, _destination, _opts), do: :ok
+    def copy(_config, _source, _destination, _opts), do: :ok
+    def copy(_source_config, _source, _destination_config, _destination, _opts), do: unsupported(:copy_between)
+    def file_exists(_config, _path), do: {:ok, :missing}
+    def list_contents(_config, _path), do: {:ok, []}
+    def create_directory(_config, _path, _opts), do: :ok
+    def delete_directory(_config, _path, _opts), do: :ok
+    def clear(_config), do: :ok
+    def set_visibility(_config, _path, _visibility), do: :ok
+    def visibility(_config, _path), do: {:ok, :public}
+
+    defp unsupported(operation) do
+      {:error, Jido.VFS.Errors.UnsupportedOperation.exception(operation: operation, adapter: __MODULE__)}
+    end
+  end
+
   describe "safe adapter configuration" do
     test "returns configured filesystem for valid adapter" do
       assert {:ok, {Jido.VFS.Adapter.Local, %Jido.VFS.Adapter.Local.Config{}}} =
@@ -76,6 +116,12 @@ defmodule JidoVFSTest do
 
     test "binary larger than chunk size returns multiple chunks" do
       assert Jido.VFS.chunk("hello world", 5) == ["hello", " worl", "d"]
+    end
+
+    test "invalid chunk size raises argument error" do
+      assert_raise ArgumentError, ~r/chunk size must be a positive integer/, fn ->
+        Jido.VFS.chunk("hello", 0)
+      end
     end
 
     test "binary much larger than chunk size returns many chunks" do
@@ -299,6 +345,68 @@ defmodule JidoVFSTest do
       assert length(list) == 2
       assert_in_list list, %Jido.VFS.Stat.File{name: "test.txt"}
       assert_in_list list, %Jido.VFS.Stat.File{name: "test-1.txt"}
+    end
+
+    test "module wrapper exposes the full public filesystem API", %{tmp_dir: prefix} do
+      defmodule Local.FullApiTest do
+        use Jido.VFS.Filesystem,
+          adapter: Jido.VFS.Adapter.Local,
+          prefix: prefix
+      end
+
+      expected_exports = [
+        write_stream: 1,
+        write_stream: 2,
+        create_directory: 1,
+        create_directory: 2,
+        delete_directory: 1,
+        delete_directory: 2,
+        clear: 0,
+        clear: 1,
+        set_visibility: 2,
+        visibility: 1,
+        stat: 1,
+        access: 2,
+        append: 2,
+        append: 3,
+        truncate: 2,
+        utime: 2,
+        commit: 0,
+        commit: 1,
+        commit: 2,
+        revisions: 0,
+        revisions: 1,
+        revisions: 2,
+        read_revision: 2,
+        read_revision: 3,
+        rollback: 1,
+        rollback: 2
+      ]
+
+      for {function, arity} <- expected_exports do
+        assert function_exported?(Local.FullApiTest, function, arity)
+      end
+
+      assert {:ok, stream} = Local.FullApiTest.write_stream("nested/stream.txt")
+      Enum.into(["Hello", " ", "World"], stream)
+      assert {:ok, "Hello World"} = Local.FullApiTest.read("nested/stream.txt")
+
+      assert :ok = Local.FullApiTest.create_directory("empty/")
+      assert {:ok, %Jido.VFS.Stat.Dir{}} = Local.FullApiTest.stat("empty/")
+      assert :ok = Local.FullApiTest.delete_directory("empty/")
+
+      assert :ok = Local.FullApiTest.append("append.txt", "ab")
+      assert {:ok, "ab"} = Local.FullApiTest.read("append.txt")
+      assert :ok = Local.FullApiTest.truncate("append.txt", 1)
+      assert :ok = Local.FullApiTest.access("append.txt", [:read])
+      assert :ok = Local.FullApiTest.set_visibility("append.txt", :private)
+      assert {:ok, :private} = Local.FullApiTest.visibility("append.txt")
+
+      assert {:error, %Jido.VFS.Errors.UnsupportedOperation{operation: :commit}} =
+               Local.FullApiTest.commit()
+
+      assert :ok = Local.FullApiTest.clear()
+      assert {:ok, :missing} = Local.FullApiTest.file_exists("append.txt")
     end
   end
 
@@ -853,6 +961,54 @@ defmodule JidoVFSTest do
                )
 
       assert {:ok, "Hello Stream"} = Jido.VFS.read(filesystem_b, "copy.txt")
+    end
+
+    test "copy_between_filesystem stream strategy returns file not found for missing local source", %{
+      tmp_dir: prefix
+    } do
+      filesystem_a = Jido.VFS.Adapter.Local.configure(prefix: prefix)
+      filesystem_b = Jido.VFS.Adapter.InMemory.configure(name: InMemoryTest.MissingLocalStreamSource)
+
+      start_supervised(filesystem_b)
+
+      assert {:error, %Jido.VFS.Errors.FileNotFound{}} =
+               Jido.VFS.copy_between_filesystem(
+                 {filesystem_a, "missing.txt"},
+                 {filesystem_b, "copy.txt"},
+                 copy_between_strategy: :stream
+               )
+
+      assert {:ok, :missing} = Jido.VFS.file_exists(filesystem_b, "copy.txt")
+    end
+
+    test "copy_between_filesystem rejects invalid chunk size" do
+      filesystem_a = {CopyOptionCheckingAdapter, %{content: "Hello"}}
+      filesystem_b = {CopyOptionCheckingAdapter, %{test_pid: self()}}
+
+      assert {:error, %Jido.VFS.Errors.AdapterError{reason: %{reason: {:invalid_chunk_size, 0}}}} =
+               Jido.VFS.copy_between_filesystem(
+                 {filesystem_a, "source.txt"},
+                 {filesystem_b, "copy.txt"},
+                 copy_between_strategy: :stream,
+                 chunk_size: 0
+               )
+    end
+
+    test "copy_between_filesystem does not forward copy-only options to adapter writes" do
+      filesystem_a = {CopyOptionCheckingAdapter, %{content: "Hello Options"}}
+      filesystem_b = {CopyOptionCheckingAdapter, %{test_pid: self()}}
+
+      assert :ok =
+               Jido.VFS.copy_between_filesystem(
+                 {filesystem_a, "source.txt"},
+                 {filesystem_b, "copy.txt"},
+                 chunk_size: 2,
+                 visibility: :private
+               )
+
+      assert_receive {:copy_option_write, "copy.txt", "Hello Options", opts}
+      refute Keyword.has_key?(opts, :chunk_size)
+      assert Keyword.fetch!(opts, :visibility) == :private
     end
 
     test "copy_between_filesystem native strategy returns unsupported when adapter cannot copy_between" do

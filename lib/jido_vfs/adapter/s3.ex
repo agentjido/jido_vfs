@@ -288,7 +288,7 @@ defmodule Jido.VFS.Adapter.S3 do
 
   @impl Jido.VFS.Adapter
   def write(%Config{} = config, path, contents, opts) do
-    path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    path = object_path(config, path)
 
     if visibility = Keyword.get(opts, :visibility) do
       store_visibility(config, path, visibility)
@@ -319,7 +319,7 @@ defmodule Jido.VFS.Adapter.S3 do
 
   @impl Jido.VFS.Adapter
   def write_stream(%Config{} = config, path, opts) do
-    path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    path = object_path(config, path)
 
     {:ok,
      %StreamUpload{
@@ -331,7 +331,7 @@ defmodule Jido.VFS.Adapter.S3 do
 
   @impl Jido.VFS.Adapter
   def read(%Config{} = config, path) do
-    path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    path = object_path(config, path)
 
     operation = ExAws.S3.get_object(config.bucket, path)
 
@@ -352,9 +352,9 @@ defmodule Jido.VFS.Adapter.S3 do
 
   @impl Jido.VFS.Adapter
   def read_stream(%Config{} = config, path, opts) do
-    path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    path = object_path(config, path)
 
-    with {:ok, :exists} <- file_exists(config, path) do
+    with {:ok, :exists} <- object_exists(config, path) do
       op = ExAws.S3.download_file(config.bucket, path, "", opts)
 
       stream =
@@ -374,23 +374,17 @@ defmodule Jido.VFS.Adapter.S3 do
     else
       {:ok, :missing} ->
         {:error, %Errors.FileNotFound{file_path: path}}
+
+      {:error, _} = error ->
+        error
     end
   end
 
   @impl Jido.VFS.Adapter
   def delete(%Config{} = config, path) do
-    path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    path = object_path(config, path)
 
-    operation = ExAws.S3.delete_object(config.bucket, path)
-
-    case ExAws.request(operation, config.config) do
-      {:ok, _} ->
-        delete_stored_visibility(config, path)
-        :ok
-
-      {:error, error} ->
-        {:error, %Errors.AdapterError{adapter: __MODULE__, reason: error}}
-    end
+    delete_object(config, path)
   end
 
   @impl Jido.VFS.Adapter
@@ -402,12 +396,12 @@ defmodule Jido.VFS.Adapter.S3 do
 
   @impl Jido.VFS.Adapter
   def copy(%Config{} = source_config, source, %Config{} = dest_config, destination, opts) do
-    source = clean_path(Jido.VFS.RelativePath.join_prefix(source_config.prefix, source))
-    destination = clean_path(Jido.VFS.RelativePath.join_prefix(dest_config.prefix, destination))
+    source_path = object_path(source_config, source)
+    destination_path = object_path(dest_config, destination)
 
     case {source_config.config, dest_config.config} do
       {config, config} ->
-        do_copy(config, {source_config.bucket, source}, {dest_config.bucket, destination}, opts)
+        do_copy(config, {source_config.bucket, source_path}, {dest_config.bucket, destination_path}, opts)
 
       _ ->
         with {:ok, content} <- read(source_config, source),
@@ -451,27 +445,18 @@ defmodule Jido.VFS.Adapter.S3 do
 
   @impl Jido.VFS.Adapter
   def file_exists(%Config{} = config, path) do
-    path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
-
-    operation = ExAws.S3.head_object(config.bucket, path)
-
-    case ExAws.request(operation, config.config) do
-      {:ok, _} ->
-        {:ok, :exists}
-
-      {:error, {:http_error, 404, _}} ->
-        {:ok, :missing}
-
-      {:error, error} ->
-        {:error, %Errors.AdapterError{adapter: __MODULE__, reason: error}}
-    end
+    object_exists(config, object_path(config, path))
   end
 
   @impl Jido.VFS.Adapter
   def list_contents(%Config{} = config, path) do
-    base_path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    base_path = object_path(config, path)
     list_prefix = if path in ["", "."], do: clear_prefix(config), else: base_path
 
+    list_contents_at_prefix(config, list_prefix)
+  end
+
+  defp list_contents_at_prefix(config, list_prefix) do
     with {:ok, %{contents: contents, common_prefixes: prefixes}} <-
            list_objects_paginated(config, list_prefix, "/") do
       directories =
@@ -520,7 +505,7 @@ defmodule Jido.VFS.Adapter.S3 do
 
   @impl Jido.VFS.Adapter
   def delete_directory(config, path, opts) do
-    path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    path = object_path(config, path)
     path = if String.ends_with?(path, "/"), do: path, else: path <> "/"
 
     if Keyword.get(opts, :recursive, false) do
@@ -533,9 +518,9 @@ defmodule Jido.VFS.Adapter.S3 do
           error
       end
     else
-      case list_contents(config, path) do
+      case list_contents_at_prefix(config, path) do
         {:ok, []} ->
-          case delete(config, String.trim_trailing(path, "/")) do
+          case delete_object(config, path) do
             :ok ->
               delete_stored_visibility_prefix(config, path)
               :ok
@@ -569,19 +554,25 @@ defmodule Jido.VFS.Adapter.S3 do
 
   @impl Jido.VFS.Adapter
   def set_visibility(%Config{} = config, path, visibility) do
-    normalized_path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    normalized_path = object_path(config, path)
     store_visibility(config, normalized_path, visibility)
     :ok
   end
 
   @impl Jido.VFS.Adapter
   def visibility(%Config{} = config, path) do
-    normalized_path = clean_path(Jido.VFS.RelativePath.join_prefix(config.prefix, path))
+    normalized_path = object_path(config, path)
     visibility = get_stored_visibility(config, normalized_path)
     {:ok, visibility}
   end
 
   # Helper Functions
+
+  defp object_path(%Config{} = config, path) do
+    config.prefix
+    |> Jido.VFS.RelativePath.join_prefix(path)
+    |> clean_path()
+  end
 
   defp clean_path(path) do
     case path do
@@ -625,6 +616,34 @@ defmodule Jido.VFS.Adapter.S3 do
 
   defp visibility_key_matches_prefix?(path, path_prefix, normalized_prefix) do
     path == normalized_prefix or String.starts_with?(path, path_prefix)
+  end
+
+  defp object_exists(%Config{} = config, path) do
+    operation = ExAws.S3.head_object(config.bucket, path)
+
+    case ExAws.request(operation, config.config) do
+      {:ok, _} ->
+        {:ok, :exists}
+
+      {:error, {:http_error, 404, _}} ->
+        {:ok, :missing}
+
+      {:error, error} ->
+        {:error, %Errors.AdapterError{adapter: __MODULE__, reason: error}}
+    end
+  end
+
+  defp delete_object(%Config{} = config, path) do
+    operation = ExAws.S3.delete_object(config.bucket, path)
+
+    case ExAws.request(operation, config.config) do
+      {:ok, _} ->
+        delete_stored_visibility(config, path)
+        :ok
+
+      {:error, error} ->
+        {:error, %Errors.AdapterError{adapter: __MODULE__, reason: error}}
+    end
   end
 
   defp stream_chunk_or_raise({:ok, {start_byte, chunk}}) when is_integer(start_byte), do: chunk

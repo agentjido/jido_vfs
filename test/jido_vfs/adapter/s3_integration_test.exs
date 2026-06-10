@@ -805,9 +805,6 @@ defmodule Jido.VFS.Adapter.S3IntegrationTest do
     end
 
     test "files under different prefixes are readable independently", %{raw_config: config} do
-      # Note: S3 adapter's list_contents with prefix shows all objects in bucket
-      # because list_objects_v2 uses the prefix from config differently.
-      # This test verifies files are readable under their respective prefixes.
       fs_a = Jido.VFS.Adapter.S3.configure(config: config, bucket: "default", prefix: "list_a/")
       fs_b = Jido.VFS.Adapter.S3.configure(config: config, bucket: "default", prefix: "list_b/")
 
@@ -823,6 +820,12 @@ defmodule Jido.VFS.Adapter.S3IntegrationTest do
       # Files under different prefixes are not accessible from wrong filesystem
       assert {:error, %Jido.VFS.Errors.FileNotFound{}} = Jido.VFS.read(fs_a, "b1.txt")
       assert {:error, %Jido.VFS.Errors.FileNotFound{}} = Jido.VFS.read(fs_b, "a1.txt")
+
+      assert {:ok, list_a} = Jido.VFS.list_contents(fs_a, ".")
+      assert {:ok, list_b} = Jido.VFS.list_contents(fs_b, ".")
+
+      assert Enum.map(list_a, & &1.name) |> Enum.sort() == ["a1.txt", "a2.txt"]
+      assert Enum.map(list_b, & &1.name) == ["b1.txt"]
     end
 
     test "delete with prefix only affects prefixed files", %{raw_config: config} do
