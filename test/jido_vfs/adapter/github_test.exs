@@ -3,6 +3,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
   use Mimic
 
   alias Jido.VFS.Adapter.GitHub
+  alias Jido.VFS.Adapter.GitHub.Client
   alias Jido.VFS.Adapter.InMemory
   alias Jido.VFS.Stat.{File, Dir}
 
@@ -11,7 +12,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
   setup :copy_modules
 
   defp copy_modules(_context) do
-    Mimic.copy(Tentacat.Contents)
+    Mimic.copy(Client)
     :ok
   end
 
@@ -29,7 +30,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
                owner: "octocat",
                repo: "Hello-World",
                ref: "main",
-               client: %Tentacat.Client{auth: nil}
+               client: %Client{auth: nil}
              } = config
     end
 
@@ -48,7 +49,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
                owner: "octocat",
                repo: "Hello-World",
                ref: "develop",
-               client: %Tentacat.Client{auth: %{access_token: "test_token"}}
+               client: %Client{auth: %{access_token: "test_token"}}
              } = config
     end
 
@@ -117,7 +118,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
       content = "Hello, World!"
       encoded_content = Base.encode64(content)
 
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "README.md", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "README.md", "main" ->
         {200, %{"content" => encoded_content, "encoding" => "base64"}, %{}}
       end)
 
@@ -125,7 +126,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns error for missing file", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "missing.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "missing.txt", "main" ->
         {404, %{"message" => "Not Found"}, %{}}
       end)
 
@@ -134,7 +135,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns error for API errors", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "error.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "error.txt", "main" ->
         {500, %{"message" => "Server Error"}, %{}}
       end)
 
@@ -142,7 +143,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "handles malformed base64 content", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "malformed.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "malformed.txt", "main" ->
         {200, %{"content" => "invalid-base64!", "encoding" => "base64"}, %{}}
       end)
 
@@ -170,12 +171,12 @@ defmodule Jido.VFS.Adapter.GitHubTest do
       content = "New file content"
 
       # File doesn't exist
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "new.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "new.txt", "main" ->
         {404, %{"message" => "Not Found"}, %{}}
       end)
 
       # Create file
-      expect(Tentacat.Contents, :create, fn _client, "octocat", "Hello-World", "new.txt", params ->
+      expect(Client, :put_content, fn _client, "octocat", "Hello-World", "new.txt", params ->
         assert params.message == "Test commit"
         assert params.content == Base.encode64(content)
         assert params.committer.name == "Test"
@@ -192,12 +193,12 @@ defmodule Jido.VFS.Adapter.GitHubTest do
       existing_sha = "existing_sha_123"
 
       # File exists
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "existing.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "existing.txt", "main" ->
         {200, %{"sha" => existing_sha}, %{}}
       end)
 
       # Update file
-      expect(Tentacat.Contents, :create, fn _client, "octocat", "Hello-World", "existing.txt", params ->
+      expect(Client, :put_content, fn _client, "octocat", "Hello-World", "existing.txt", params ->
         assert params.sha == existing_sha
         assert params.content == Base.encode64(content)
 
@@ -210,11 +211,11 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     test "uses custom commit options", %{config: config} do
       content = "Content with custom commit"
 
-      expect(Tentacat.Contents, :find_in, fn _, _, _, _, _ ->
+      expect(Client, :get_content, fn _, _, _, _, _ ->
         {404, %{}, %{}}
       end)
 
-      expect(Tentacat.Contents, :create, fn _client, "octocat", "Hello-World", "custom.txt", params ->
+      expect(Client, :put_content, fn _client, "octocat", "Hello-World", "custom.txt", params ->
         assert params.message == "Custom message"
         assert params.committer == %{name: "Custom", email: "custom@example.com"}
 
@@ -232,11 +233,11 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     test "returns error for write API failures", %{config: config} do
       content = "Content that will fail"
 
-      expect(Tentacat.Contents, :find_in, fn _, _, _, _, _ ->
+      expect(Client, :get_content, fn _, _, _, _, _ ->
         {404, %{}, %{}}
       end)
 
-      expect(Tentacat.Contents, :create, fn _client, "octocat", "Hello-World", "fail.txt", _params ->
+      expect(Client, :put_content, fn _client, "octocat", "Hello-World", "fail.txt", _params ->
         {422, %{"message" => "Validation Failed"}, %{}}
       end)
 
@@ -247,12 +248,12 @@ defmodule Jido.VFS.Adapter.GitHubTest do
       content = "Content for file with lookup issues"
 
       # File lookup fails (treated as file doesn't exist)
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "lookup_error.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "lookup_error.txt", "main" ->
         {500, %{"message" => "Server Error"}, %{}}
       end)
 
       # Create file (since lookup failed, sha is nil)
-      expect(Tentacat.Contents, :create, fn _client, "octocat", "Hello-World", "lookup_error.txt", params ->
+      expect(Client, :put_content, fn _client, "octocat", "Hello-World", "lookup_error.txt", params ->
         # No sha means new file
         refute Map.has_key?(params, :sha)
         {201, %{"commit" => %{"sha" => "abc123"}}, %{}}
@@ -272,12 +273,12 @@ defmodule Jido.VFS.Adapter.GitHubTest do
       file_sha = "file_sha_123"
 
       # File exists
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "delete_me.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "delete_me.txt", "main" ->
         {200, %{"sha" => file_sha}, %{}}
       end)
 
       # Delete file
-      expect(Tentacat.Contents, :remove, fn _client, "octocat", "Hello-World", "delete_me.txt", params ->
+      expect(Client, :delete_content, fn _client, "octocat", "Hello-World", "delete_me.txt", params ->
         assert params.sha == file_sha
         assert params.message == "Delete delete_me.txt via Jido.VFS"
 
@@ -288,7 +289,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns error for missing file", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "missing.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "missing.txt", "main" ->
         {404, %{"message" => "Not Found"}, %{}}
       end)
 
@@ -300,12 +301,12 @@ defmodule Jido.VFS.Adapter.GitHubTest do
       file_sha = "file_sha_123"
 
       # File exists
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "error_delete.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "error_delete.txt", "main" ->
         {200, %{"sha" => file_sha}, %{}}
       end)
 
       # Delete fails
-      expect(Tentacat.Contents, :remove, fn _client, "octocat", "Hello-World", "error_delete.txt", _params ->
+      expect(Client, :delete_content, fn _client, "octocat", "Hello-World", "error_delete.txt", _params ->
         {422, %{"message" => "Validation Failed"}, %{}}
       end)
 
@@ -313,7 +314,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns error when file lookup for delete fails", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "lookup_error.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "lookup_error.txt", "main" ->
         {500, %{"message" => "Server Error"}, %{}}
       end)
 
@@ -334,7 +335,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
         %{"type" => "file", "name" => "package.json", "size" => 512}
       ]
 
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "", "main" ->
         {200, contents, %{}}
       end)
 
@@ -352,7 +353,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     test "handles single file response", %{config: config} do
       file_content = %{"type" => "file", "name" => "single.txt", "size" => 256}
 
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "single.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "single.txt", "main" ->
         {200, file_content, %{}}
       end)
 
@@ -361,7 +362,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "normalizes path for subdirectories", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "src/lib", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "src/lib", "main" ->
         {200, [], %{}}
       end)
 
@@ -369,7 +370,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns error for missing directory", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "missing", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "missing", "main" ->
         {404, %{"message" => "Not Found"}, %{}}
       end)
 
@@ -378,7 +379,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns error for API failures", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "error_dir", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "error_dir", "main" ->
         {500, %{"message" => "Server Error"}, %{}}
       end)
 
@@ -393,7 +394,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns true for existing file", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "exists.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "exists.txt", "main" ->
         {200, %{"type" => "file"}, %{}}
       end)
 
@@ -401,7 +402,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns false for directory", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "directory", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "directory", "main" ->
         {200, %{"type" => "dir"}, %{}}
       end)
 
@@ -409,7 +410,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns false for missing file", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "missing.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "missing.txt", "main" ->
         {404, %{}, %{}}
       end)
 
@@ -417,7 +418,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
     end
 
     test "returns error for API failures", %{config: config} do
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "error.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "error.txt", "main" ->
         {500, %{"message" => "Server Error"}, %{}}
       end)
 
@@ -435,17 +436,17 @@ defmodule Jido.VFS.Adapter.GitHubTest do
       content = "File to copy"
 
       # Read source
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "source.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "source.txt", "main" ->
         {200, %{"content" => Base.encode64(content), "encoding" => "base64"}, %{}}
       end)
 
       # Check if destination exists (doesn't)
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "dest.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "dest.txt", "main" ->
         {404, %{}, %{}}
       end)
 
       # Write destination
-      expect(Tentacat.Contents, :create, fn _client, "octocat", "Hello-World", "dest.txt", _params ->
+      expect(Client, :put_content, fn _client, "octocat", "Hello-World", "dest.txt", _params ->
         {201, %{}, %{}}
       end)
 
@@ -464,27 +465,27 @@ defmodule Jido.VFS.Adapter.GitHubTest do
       source_sha = "source_sha_123"
 
       # Read source
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "source.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "source.txt", "main" ->
         {200, %{"content" => Base.encode64(content), "encoding" => "base64"}, %{}}
       end)
 
       # Check if destination exists (doesn't)
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "dest.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "dest.txt", "main" ->
         {404, %{}, %{}}
       end)
 
       # Write destination
-      expect(Tentacat.Contents, :create, fn _client, "octocat", "Hello-World", "dest.txt", _params ->
+      expect(Client, :put_content, fn _client, "octocat", "Hello-World", "dest.txt", _params ->
         {201, %{}, %{}}
       end)
 
       # Get source for deletion
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "source.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "source.txt", "main" ->
         {200, %{"sha" => source_sha}, %{}}
       end)
 
       # Delete source
-      expect(Tentacat.Contents, :remove, fn _client, "octocat", "Hello-World", "source.txt", _params ->
+      expect(Client, :delete_content, fn _client, "octocat", "Hello-World", "source.txt", _params ->
         {200, %{}, %{}}
       end)
 
@@ -504,7 +505,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
 
       content = "fallback copy content"
 
-      expect(Tentacat.Contents, :find_in, fn _client, "octocat", "Hello-World", "source.txt", "main" ->
+      expect(Client, :get_content, fn _client, "octocat", "Hello-World", "source.txt", "main" ->
         {200, %{"content" => Base.encode64(content), "encoding" => "base64"}, %{}}
       end)
 
