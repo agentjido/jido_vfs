@@ -3,7 +3,7 @@ defmodule Jido.VFS.Adapter.GitHub do
   A GitHub virtual filesystem adapter for Jido.VFS.
 
   This adapter allows you to interact with GitHub repositories as if they were
-  a local filesystem, using the GitHub API through the `tentacat` package.
+  a local filesystem, using the GitHub API.
 
   ## Configuration
 
@@ -70,6 +70,7 @@ defmodule Jido.VFS.Adapter.GitHub do
   def versioning_module, do: nil
 
   alias Jido.VFS.Errors
+  alias Jido.VFS.Adapter.GitHub.Client
   alias Jido.VFS.Stat.File
   alias Jido.VFS.Stat.Dir
 
@@ -79,7 +80,7 @@ defmodule Jido.VFS.Adapter.GitHub do
           owner: String.t(),
           repo: String.t(),
           ref: String.t(),
-          client: Tentacat.Client.t(),
+          client: term(),
           commit_info: %{
             message: String.t(),
             committer: %{name: String.t(), email: String.t()},
@@ -110,8 +111,8 @@ defmodule Jido.VFS.Adapter.GitHub do
 
     client =
       case auth do
-        nil -> Tentacat.Client.new()
-        auth_map -> Tentacat.Client.new(auth_map)
+        nil -> Client.new()
+        auth_map -> Client.new(auth_map)
       end
 
     commit_info =
@@ -130,9 +131,9 @@ defmodule Jido.VFS.Adapter.GitHub do
 
   @impl true
   def read(%__MODULE__{} = config, path) do
-    case Tentacat.Contents.find_in(config.client, config.owner, config.repo, path, config.ref) do
+    case Client.get_content(config.client, config.owner, config.repo, path, config.ref) do
       {200, %{"content" => content, "encoding" => "base64"}, _response} ->
-        case Base.decode64(content) do
+        case Base.decode64(content, ignore: :whitespace) do
           {:ok, decoded_content} ->
             {:ok, decoded_content}
 
@@ -160,7 +161,7 @@ defmodule Jido.VFS.Adapter.GitHub do
 
     # Get current file SHA if it exists (required for updates)
     current_sha =
-      case Tentacat.Contents.find_in(config.client, config.owner, config.repo, path, config.ref) do
+      case Client.get_content(config.client, config.owner, config.repo, path, config.ref) do
         {200, %{"sha" => sha}, _response} -> sha
         _ -> nil
       end
@@ -174,7 +175,7 @@ defmodule Jido.VFS.Adapter.GitHub do
 
     params = if current_sha, do: Map.put(params, :sha, current_sha), else: params
 
-    case Tentacat.Contents.create(config.client, config.owner, config.repo, path, params) do
+    case Client.put_content(config.client, config.owner, config.repo, path, params) do
       {201, _body, _response} ->
         :ok
 
@@ -194,7 +195,7 @@ defmodule Jido.VFS.Adapter.GitHub do
     author = config.commit_info.author
 
     # Get current file SHA (required for deletion)
-    case Tentacat.Contents.find_in(config.client, config.owner, config.repo, path, config.ref) do
+    case Client.get_content(config.client, config.owner, config.repo, path, config.ref) do
       {200, %{"sha" => sha}, _response} ->
         params = %{
           message: message,
@@ -203,7 +204,7 @@ defmodule Jido.VFS.Adapter.GitHub do
           author: author
         }
 
-        case Tentacat.Contents.remove(config.client, config.owner, config.repo, path, params) do
+        case Client.delete_content(config.client, config.owner, config.repo, path, params) do
           {200, _body, _response} ->
             :ok
 
@@ -244,7 +245,7 @@ defmodule Jido.VFS.Adapter.GitHub do
         p -> p
       end
 
-    case Tentacat.Contents.find_in(
+    case Client.get_content(
            config.client,
            config.owner,
            config.repo,
@@ -270,7 +271,7 @@ defmodule Jido.VFS.Adapter.GitHub do
 
   @impl true
   def file_exists(%__MODULE__{} = config, path) do
-    case Tentacat.Contents.find_in(config.client, config.owner, config.repo, path, config.ref) do
+    case Client.get_content(config.client, config.owner, config.repo, path, config.ref) do
       {200, %{"type" => "file"}, _response} -> {:ok, :exists}
       {200, %{"type" => "dir"}, _response} -> {:ok, :missing}
       {404, _body, _response} -> {:ok, :missing}

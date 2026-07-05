@@ -61,16 +61,14 @@ defmodule Jido.VFS.MixProject do
   defp deps do
     [
       # Runtime dependencies
-      {:ex_aws, "~> 2.1"},
+      {:ex_aws, "~> 2.7"},
       {:ex_aws_s3, "~> 2.2"},
       {:sweet_xml, "~> 0.6"},
       {:jason, "~> 1.0"},
       {:eternal, "~> 1.2.2"},
       {:splode, "~> 0.3.0"},
       {:git_cli, "~> 0.3.0"},
-      {:tentacat, "~> 2.0"},
-      # `sprites` is a git dependency; keep it test-only so Hex package validation passes.
-      {:sprites, github: "superfly/sprites-ex", only: :test, runtime: false, optional: true},
+      {:req, "~> 0.6"},
 
       # Dev/Test dependencies
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
