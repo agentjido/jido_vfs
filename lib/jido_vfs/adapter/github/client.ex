@@ -10,6 +10,7 @@ defmodule Jido.VFS.Adapter.GitHub.Client do
         }
   @type t :: %__MODULE__{auth: auth() | nil, endpoint: String.t()}
 
+  @doc false
   @spec new(auth() | nil, keyword()) :: t()
   def new(auth \\ nil, opts \\ []) do
     %__MODULE__{
@@ -18,16 +19,19 @@ defmodule Jido.VFS.Adapter.GitHub.Client do
     }
   end
 
+  @doc false
   @spec get_content(t(), String.t(), String.t(), String.t(), String.t()) :: response()
   def get_content(%__MODULE__{} = client, owner, repo, path, ref) do
     request(client, :get, contents_path(owner, repo, path), params: [ref: ref])
   end
 
+  @doc false
   @spec put_content(t(), String.t(), String.t(), String.t(), map()) :: response()
   def put_content(%__MODULE__{} = client, owner, repo, path, params) do
     request(client, :put, contents_path(owner, repo, path), json: params)
   end
 
+  @doc false
   @spec delete_content(t(), String.t(), String.t(), String.t(), map()) :: response()
   def delete_content(%__MODULE__{} = client, owner, repo, path, params) do
     request(client, :delete, contents_path(owner, repo, path), json: params)
