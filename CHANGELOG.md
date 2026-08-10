@@ -35,6 +35,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `revisions/3` consumers should expect `%Jido.VFS.Revision{}` values (with `sha` populated for all versioned adapters).
 - Runtime configuration for Git/GitHub must use `:jido_vfs` app env keys.
 
+## [v1.0.1](https://github.com/agentjido/jido_vfs/compare/v1.0.0...v1.0.1) (2026-08-10)
+
+
+
+
+### Bug Fixes:
+
+* release: configure git_ops by mikehostetler
+
+* release: add git_ops dependency by mikehostetler
+
+* deps: update Mint for CVE-2026-59249 by mikehostetler
+
+* deps: resolve hex audit advisories by dependabot[bot]
+
+* harden vfs wrapper and streaming edge cases by mikehostetler
+
 ## [1.0.0] - 2024-12-24
 
 ### Added

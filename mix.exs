@@ -1,7 +1,7 @@
 defmodule Jido.VFS.MixProject do
   use Mix.Project
 
-  @version "1.0.0"
+  @version "1.0.1"
   @source_url "https://github.com/agentjido/jido_vfs"
   @description "A filesystem abstraction for Elixir with adapters for Local, S3, Git, GitHub, ETS, and InMemory storage."
 
