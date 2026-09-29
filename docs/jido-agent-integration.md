@@ -19,7 +19,7 @@ Keep `jido_vfs` as the adapter/core package and expose agent tools in one of the
 
 - Thin action modules in the consuming app.
 - A separate `jido_vfs_actions` package.
-- A tool pack published via `jido_lib` or another ecosystem integration package.
+- A tool pack in a separately maintained ecosystem integration package.
 
 ## Suggested default action set
 
