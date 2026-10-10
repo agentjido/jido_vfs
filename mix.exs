@@ -74,7 +74,7 @@ defmodule Jido.VFS.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:doctor, "~> 0.21", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.40.4", only: :dev, runtime: false},
       {:git_ops, "~> 2.9", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: [:dev, :test]},
       {:mimic, "~> 2.0", only: :test},
@@ -91,7 +91,6 @@ defmodule Jido.VFS.MixProject do
     [
       setup: ["deps.get"],
       test: "test --exclude flaky",
-      docs: "docs --formatter html",
       q: ["quality"],
       quality: [
         "format --check-formatted",
