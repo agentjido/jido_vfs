@@ -354,6 +354,10 @@ Adapter authors should follow the
 [Adapter Onboarding Checklist](docs/adapter-onboarding-checklist.md)
 to ensure metadata callbacks, typed errors, and contract coverage are complete.
 
+## Local Documentation
+
+Run `mix docs` to generate HTML and Markdown documentation in `doc/`, including Markdown pages and `llms.txt`.
+
 ## License
 
 Apache-2.0 - see [LICENSE.md](LICENSE.md) for details.

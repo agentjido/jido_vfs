@@ -22,5 +22,5 @@ jobs:
     secrets: inherit
     with:
       credo_command: mix credo --min-priority higher
-      docs_command: mix docs -f html
+      docs_command: mix docs -f html -f markdown
       test_command: mix test
