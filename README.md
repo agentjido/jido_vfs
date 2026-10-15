@@ -375,3 +375,29 @@ For Jido agents, prefer wrapping `jido_vfs` with `Jido.Action` modules in a high
 - Full quality gate: `mix quality`
 - Release preflight: `mix release.ready`
 - Optional flaky cases: `mix test --include flaky`
+
+## Atomic memory workspaces
+
+The InMemory adapter supports captures and checked edit batches. Captures contain
+file bytes, directories, and metadata. They remain readable after storage stops.
+Tokens are opaque state preconditions, not version or commit IDs.
+
+```elixir
+{:ok, capture, token} = Jido.VFS.capture(filesystem)
+{:ok, next_token} = Jido.VFS.apply_edits(filesystem, token, [
+  {:mkdir, "empty"},
+  {:write, "bin/run", "echo hello", mode: :executable}
+])
+{:ok, _} = Jido.VFS.replace(filesystem, next_token, capture)
+```
+
+A batch either applies completely or leaves storage unchanged. Supported edits
+are `{:write, path, bytes}`, `{:write, path, bytes, opts}`, `{:mkdir, path}`, and
+`{:delete, path}`. Delete requires an empty directory. Paths are canonical relative
+paths. Writes preserve file mode unless an explicit mode is supplied.
+
+Every successful memory mutation invalidates older tokens. A token cannot be
+reused after restore or storage restart. Concurrent checked batches at the same
+token have at most one winner. Other adapters return `UnsupportedOperation`.
+Captures do not include stored revision history; replacement preserves that history.
+There is no atomic operation across filesystems or mounts.

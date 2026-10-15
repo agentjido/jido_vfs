@@ -143,3 +143,9 @@ defmodule Jido.VFS.Errors.NotDirectory do
     "Path is not a directory: #{path}"
   end
 end
+
+defmodule Jido.VFS.Errors.StaleState do
+  @moduledoc "The expected filesystem state is no longer current."
+  use Splode.Error, fields: [], class: :invalid
+  def message(_), do: "Filesystem state changed; capture again before applying edits"
+end

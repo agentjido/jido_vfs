@@ -63,19 +63,13 @@ defmodule Jido.VFS.Adapter.InMemory do
 
     defimpl Collectable do
       def into(%{config: config, path: path} = stream) do
-        original =
-          case Jido.VFS.Adapter.InMemory.read(config, path) do
-            {:ok, contents} -> contents
-            _ -> ""
-          end
-
         fun = fn
           list, {:cont, x} ->
             [x | list]
 
           list, :done ->
-            contents = original <> IO.iodata_to_binary(:lists.reverse(list))
-            :ok = Jido.VFS.Adapter.InMemory.write(config, path, contents, [])
+            contents = IO.iodata_to_binary(:lists.reverse(list))
+            :ok = Jido.VFS.Adapter.InMemory.append(config, path, contents, [])
             stream
 
           _, :halt ->
@@ -121,7 +115,7 @@ defmodule Jido.VFS.Adapter.InMemory do
   end
 
   def start_link(%Config{} = config) do
-    Agent.start_link(fn -> {%{}, %{}, %{}} end, name: Jido.VFS.Registry.via(__MODULE__, config.name))
+    Agent.start_link(fn -> {{%{}, %{}, %{}}, make_ref()} end, name: Jido.VFS.Registry.via(__MODULE__, config.name))
   end
 
   @impl Jido.VFS.Adapter
@@ -139,8 +133,19 @@ defmodule Jido.VFS.Adapter.InMemory do
     directory_visibility = Keyword.get(opts, :directory_visibility, :private)
     timestamp = System.system_time(:second)
 
-    Agent.update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
-      file = {IO.iodata_to_binary(contents), %{visibility: visibility, mtime: timestamp}}
+    state_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+      if match?({children, _} when is_map(children), get_in(state, accessor(path))),
+        do: raise(ArgumentError, "path is a directory")
+
+      old_meta =
+        case get_in(state, accessor(path)) do
+          {bytes, meta} when is_binary(bytes) -> meta
+          _ -> %{}
+        end
+
+      mode = Keyword.get(opts, :mode, Map.get(old_meta, :mode, :regular))
+      unless mode in [:regular, :executable], do: raise(ArgumentError, "invalid mode")
+      file = {IO.iodata_to_binary(contents), %{visibility: visibility, mtime: timestamp, mode: mode}}
       directory = {%{}, %{visibility: directory_visibility, mtime: timestamp}}
       put_in(state, accessor(path, directory), file)
     end)
@@ -158,7 +163,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def read(config, path) do
-    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
         {binary, _meta} when is_binary(binary) -> {:ok, binary}
         _ -> {:error, Errors.FileNotFound.exception(file_path: path)}
@@ -187,12 +192,10 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def delete(%Config{} = config, path) do
-    Agent.update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       {_, state} = pop_in(state, accessor(path))
       state
     end)
-
-    :ok
   end
 
   @impl Jido.VFS.Adapter
@@ -201,10 +204,10 @@ defmodule Jido.VFS.Adapter.InMemory do
     directory_visibility = Keyword.get(opts, :directory_visibility, :private)
     timestamp = System.system_time(:second)
 
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(source)) do
-        {binary, _meta} when is_binary(binary) ->
-          file = {binary, %{visibility: visibility, mtime: timestamp}}
+        {binary, meta} when is_binary(binary) ->
+          file = {binary, Map.merge(meta, %{visibility: visibility, mtime: timestamp})}
           directory = {%{}, %{visibility: directory_visibility, mtime: timestamp}}
 
           {_, state} =
@@ -224,10 +227,10 @@ defmodule Jido.VFS.Adapter.InMemory do
     directory_visibility = Keyword.get(opts, :directory_visibility, :private)
     timestamp = System.system_time(:second)
 
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(source)) do
-        {binary, _meta} when is_binary(binary) ->
-          file = {binary, %{visibility: visibility, mtime: timestamp}}
+        {binary, meta} when is_binary(binary) ->
+          file = {binary, Map.merge(meta, %{visibility: visibility, mtime: timestamp})}
           directory = {%{}, %{visibility: directory_visibility, mtime: timestamp}}
           {:ok, put_in(state, accessor(destination, directory), file)}
 
@@ -250,7 +253,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def file_exists(%Config{} = config, path) do
-    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
         {binary, _meta} when is_binary(binary) -> {:ok, :exists}
         _ -> {:ok, :missing}
@@ -261,7 +264,7 @@ defmodule Jido.VFS.Adapter.InMemory do
   @impl Jido.VFS.Adapter
   def list_contents(%Config{} = config, path) do
     contents =
-      Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+      state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
         paths =
           case get_in(state, accessor(path)) do
             {%{} = map, _meta} -> map
@@ -291,18 +294,16 @@ defmodule Jido.VFS.Adapter.InMemory do
     directory_visibility = Keyword.get(opts, :directory_visibility, :private)
     directory = {%{}, %{visibility: directory_visibility, mtime: System.system_time(:second)}}
 
-    Agent.update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       put_in(state, accessor(path, directory), directory)
     end)
-
-    :ok
   end
 
   @impl Jido.VFS.Adapter
   def delete_directory(%Config{} = config, path, opts) do
     recursive? = Keyword.get(opts, :recursive, false)
 
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case {recursive?, get_in(state, accessor(path))} do
         {_, nil} ->
           {:ok, state}
@@ -319,12 +320,12 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def clear(%Config{} = config) do
-    Agent.update(Jido.VFS.Registry.via(__MODULE__, config.name), fn _ -> {%{}, %{}, %{}} end)
+    state_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn _ -> {%{}, %{}, %{}} end)
   end
 
   @impl Jido.VFS.Adapter
   def set_visibility(%Config{} = config, path, visibility) do
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
         {_, _} ->
           state =
@@ -342,7 +343,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def visibility(%Config{} = config, path) do
-    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
         {_, %{visibility: visibility}} -> {:ok, visibility}
         _ -> {:error, Errors.FileNotFound.exception(file_path: path)}
@@ -374,7 +375,7 @@ defmodule Jido.VFS.Adapter.InMemory do
     visibility = Keyword.get(opts, :visibility, :private)
     directory_visibility = Keyword.get(opts, :directory_visibility, :private)
 
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn {files, dirs, versions} ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn {files, dirs, versions} ->
       version_id = generate_version_id()
       timestamp = System.system_time(:second)
 
@@ -411,7 +412,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def read_version(%Config{} = config, path, version_id) do
-    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn {_files, _dirs, versions} ->
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn {_files, _dirs, versions} ->
       case Map.get(versions, {path, version_id}) do
         {binary, _meta} when is_binary(binary) -> {:ok, binary}
         _ -> {:error, Errors.FileNotFound.exception(file_path: "#{path}@#{version_id}")}
@@ -421,7 +422,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def list_versions(%Config{} = config, path) do
-    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn {_files, _dirs, versions} ->
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn {_files, _dirs, versions} ->
       case Map.get(versions, path) do
         nil -> {:ok, []}
         version_list -> {:ok, Enum.reverse(version_list)}
@@ -431,7 +432,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def delete_version(%Config{} = config, path, version_id) do
-    Agent.update(Jido.VFS.Registry.via(__MODULE__, config.name), fn {files, dirs, versions} ->
+    state_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn {files, dirs, versions} ->
       # Remove the version data
       versions = Map.delete(versions, {path, version_id})
 
@@ -448,7 +449,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def get_latest_version(%Config{} = config, path) do
-    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn {_files, _dirs, versions} ->
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn {_files, _dirs, versions} ->
       case Map.get(versions, path) do
         [latest | _] -> {:ok, latest.version_id}
         [] -> {:error, Errors.FileNotFound.exception(file_path: path)}
@@ -459,7 +460,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def restore_version(%Config{} = config, path, version_id) do
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn {files, dirs, versions} ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn {files, dirs, versions} ->
       case Map.get(versions, {path, version_id}) do
         {binary, meta} when is_binary(binary) ->
           # Restore the file to current
@@ -488,7 +489,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def stat(%Config{} = config, path) do
-    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
         {binary, meta} when is_binary(binary) ->
           {:ok,
@@ -516,7 +517,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def access(%Config{} = config, path, modes) do
-    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
         {_, meta} ->
           # InMemory adapter supports all access modes
@@ -542,12 +543,12 @@ defmodule Jido.VFS.Adapter.InMemory do
     visibility = Keyword.get(opts, :visibility, :private)
     directory_visibility = Keyword.get(opts, :directory_visibility, :private)
 
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
-        {existing_binary, _meta} when is_binary(existing_binary) ->
+        {existing_binary, meta} when is_binary(existing_binary) ->
           # File exists, append to it
           new_contents = existing_binary <> IO.iodata_to_binary(contents)
-          file = {new_contents, %{visibility: visibility, mtime: System.system_time(:second)}}
+          file = {new_contents, Map.merge(meta, %{visibility: visibility, mtime: System.system_time(:second)})}
           {:ok, put_in(state, accessor(path), file)}
 
         _ ->
@@ -563,7 +564,7 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def truncate(%Config{} = config, path, new_size) do
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
         {binary, meta} when is_binary(binary) ->
           current_size = byte_size(binary)
@@ -597,7 +598,7 @@ defmodule Jido.VFS.Adapter.InMemory do
   def utime(%Config{} = config, path, mtime) do
     mtime_seconds = DateTime.to_unix(mtime, :second)
 
-    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
       case get_in(state, accessor(path)) do
         {contents, meta} ->
           updated_meta = Map.put(meta, :mtime, mtime_seconds)
@@ -612,5 +613,68 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   defp generate_version_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+
+  @doc "Captures one atomic memory state."
+  @impl Jido.VFS.Adapter
+  @spec capture(Config.t()) :: {:ok, Jido.VFS.Capture.t(), reference()}
+  def capture(config) do
+    Agent.get(Jido.VFS.Registry.via(__MODULE__, config.name), fn {data, token} ->
+      {tree, _meta} = Map.get(elem(data, 0), "/", {%{}, %{visibility: :private}})
+      {:ok, Jido.VFS.Capture.from_tree(tree), token}
+    end)
+  end
+
+  @doc "Applies an edit batch only at the expected state."
+  @impl Jido.VFS.Adapter
+  @spec apply_edits(Config.t(), reference(), list()) :: {:ok, reference()} | {:error, term()}
+  def apply_edits(config, expected, edits),
+    do: change_tree(config, expected, fn capture -> Jido.VFS.Capture.edit(capture, edits) end)
+
+  @doc "Replaces working content without changing stored revision history."
+  @impl Jido.VFS.Adapter
+  @spec replace(Config.t(), reference(), Jido.VFS.Capture.t()) :: {:ok, reference()} | {:error, term()}
+  def replace(config, expected, capture), do: change_tree(config, expected, fn _ -> capture end)
+
+  defp change_tree(config, expected, fun) do
+    Agent.get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn {data, token} = state ->
+      if expected == token do
+        try do
+          {tree, meta} = Map.get(elem(data, 0), "/", {%{}, %{visibility: :private}})
+          next_tree = tree |> Jido.VFS.Capture.from_tree() |> fun.() |> Jido.VFS.Capture.to_tree()
+          next_token = make_ref()
+          {{:ok, next_token}, {put_elem(data, 0, %{"/" => {next_tree, meta}}), next_token}}
+        rescue
+          error ->
+            {{:error, Errors.AdapterError.exception(adapter: __MODULE__, reason: Exception.message(error))}, state}
+        end
+      else
+        {{:error, Errors.StaleState.exception([])}, state}
+      end
+    end)
+  end
+
+  defp state_get(server, fun), do: Agent.get(server, fn {data, _token} -> fun.(data) end)
+
+  defp state_update(server, fun) do
+    case state_get_and_update(server, fn data -> {:ok, fun.(data)} end) do
+      :ok -> :ok
+      error -> error
+    end
+  end
+
+  defp state_get_and_update(server, fun) do
+    Agent.get_and_update(server, fn {data, token} = state ->
+      try do
+        case fun.(data) do
+          {{:error, _} = error, _next} -> {error, state}
+          {reply, next} -> {reply, {next, make_ref()}}
+        end
+      rescue
+        error ->
+          {{:error, Errors.AdapterError.exception(adapter: __MODULE__, reason: Exception.message(error))},
+           {data, token}}
+      end
+    end)
   end
 end

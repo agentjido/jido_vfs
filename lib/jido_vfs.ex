@@ -10,7 +10,10 @@ defmodule Jido.VFS do
   @type adapter :: module()
   @type filesystem :: {module(), Jido.VFS.Adapter.config()}
   @type operation ::
-          :write
+          :capture
+          | :apply_edits
+          | :replace
+          | :write
           | :write_stream
           | :read
           | :read_stream
@@ -52,7 +55,7 @@ defmodule Jido.VFS do
   def safe_configure(adapter, opts \\ [])
 
   def safe_configure(adapter, opts) when is_atom(adapter) and is_list(opts) do
-    if function_exported?(adapter, :configure, 1) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :configure, 1) do
       case normalize_adapter_call(fn -> adapter.configure(opts) end) do
         {configured_adapter, _config} = filesystem
         when is_atom(configured_adapter) and configured_adapter not in [:ok, :error] ->
@@ -114,6 +117,9 @@ defmodule Jido.VFS do
       false
     else
       case operation do
+        :capture -> function_exported?(adapter, :capture, 1)
+        :apply_edits -> function_exported?(adapter, :apply_edits, 3)
+        :replace -> function_exported?(adapter, :replace, 3)
         :copy_between -> function_exported?(adapter, :copy, 5)
         :write -> function_exported?(adapter, :write, 4)
         :write_stream -> function_exported?(adapter, :write_stream, 3)
@@ -285,8 +291,17 @@ defmodule Jido.VFS do
       {:ok, "Hello World"} = LocalFileSystem.read("test.txt")
 
   """
-  @spec read(filesystem, Path.t(), keyword()) :: {:ok, binary} | {:error, term}
-  def read({adapter, config}, path, _opts \\ []) do
+  @spec read(filesystem | Jido.VFS.Capture.t(), Path.t(), keyword()) :: {:ok, binary} | {:error, term}
+  def read(filesystem, path, opts \\ [])
+
+  def read(%Jido.VFS.Capture{entries: entries}, path, _opts) do
+    case Map.get(entries, path) do
+      %{type: :file, content: content} -> {:ok, content}
+      _ -> {:error, Errors.FileNotFound.exception(file_path: path)}
+    end
+  end
+
+  def read({adapter, config}, path, _opts) do
     with {:ok, normalized_path} <- Jido.VFS.RelativePath.normalize(path) do
       normalize_adapter_call(fn -> adapter.read(config, normalized_path) end)
     else
@@ -1516,5 +1531,33 @@ defmodule Jido.VFS do
     else
       _ -> unsupported(adapter, :rollback)
     end
+  end
+
+  @doc "Captures an immutable filesystem state and its concurrency token."
+  @spec capture(filesystem()) :: {:ok, Jido.VFS.Capture.t(), term()} | {:error, term()}
+  def capture({adapter, config} = fs) do
+    if supports?(fs, :capture),
+      do: normalize_adapter_call(fn -> adapter.capture(config) end),
+      else: unsupported(adapter, :capture)
+  end
+
+  @doc "Returns the portable entries in a capture. Captures survive storage closure."
+  @spec entries(Jido.VFS.Capture.t()) :: {:ok, map()}
+  def entries(%Jido.VFS.Capture{entries: entries}), do: {:ok, entries}
+
+  @doc "Applies all edits atomically at the expected state, or changes nothing."
+  @spec apply_edits(filesystem(), term(), list()) :: {:ok, term()} | {:error, term()}
+  def apply_edits({adapter, config} = fs, token, edits) do
+    if supports?(fs, :apply_edits),
+      do: normalize_adapter_call(fn -> adapter.apply_edits(config, token, edits) end),
+      else: unsupported(adapter, :apply_edits)
+  end
+
+  @doc "Atomically replaces working content at the expected state. History is unchanged."
+  @spec replace(filesystem(), term(), Jido.VFS.Capture.t()) :: {:ok, term()} | {:error, term()}
+  def replace({adapter, config} = fs, token, capture) do
+    if supports?(fs, :replace),
+      do: normalize_adapter_call(fn -> adapter.replace(config, token, capture) end),
+      else: unsupported(adapter, :replace)
   end
 end
