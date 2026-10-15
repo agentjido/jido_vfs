@@ -66,4 +66,8 @@ defmodule Jido.VFS.Adapter do
   @callback delete_version(config, path, version_id :: binary) :: :ok | {:error, term}
   @callback get_latest_version(config, path) :: {:ok, version_id :: binary} | {:error, term}
   @callback restore_version(config, path, version_id :: binary) :: :ok | {:error, term}
+  @optional_callbacks capture: 1, apply_edits: 3, replace: 3
+  @callback capture(config) :: {:ok, Jido.VFS.Capture.t(), term()} | {:error, term()}
+  @callback apply_edits(config, term(), list()) :: {:ok, term()} | {:error, term()}
+  @callback replace(config, term(), Jido.VFS.Capture.t()) :: {:ok, term()} | {:error, term()}
 end

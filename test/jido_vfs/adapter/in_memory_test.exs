@@ -17,14 +17,7 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
 
       :ok = Jido.VFS.Adapter.InMemory.write(config, "test.txt", "Hello World", [])
 
-      assert {:ok, {"Hello World", _meta}} =
-               Agent.get(via(test), fn state ->
-                 state
-                 |> elem(0)
-                 |> Map.fetch!("/")
-                 |> elem(0)
-                 |> Map.fetch("test.txt")
-               end)
+      assert {:ok, "Hello World"} = Jido.VFS.read(filesystem, "test.txt")
     end
 
     test "folders are automatically created is missing", %{test: test} do
@@ -45,9 +38,7 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       start_supervised(filesystem)
 
       :ok =
-        Agent.update(via(test), fn _state ->
-          {%{"/" => {%{"test.txt" => {"Hello World", %{}}}, %{}}}, %{}}
-        end)
+        Jido.VFS.write(filesystem, "test.txt", "Hello World")
 
       assert {:ok, "Hello World"} = Jido.VFS.Adapter.InMemory.read(config, "test.txt")
     end
@@ -58,9 +49,7 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       start_supervised(filesystem)
 
       :ok =
-        Agent.update(via(test), fn _state ->
-          {%{"/" => {%{"test.txt" => {"Hello World", %{}}}, %{}}}, %{}}
-        end)
+        Jido.VFS.write(filesystem, "test.txt", "Hello World")
 
       assert {:ok, %Jido.VFS.Adapter.InMemory.AgentStream{} = stream} =
                Jido.VFS.Adapter.InMemory.read_stream(config, "test.txt", [])
@@ -74,9 +63,7 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       start_supervised(filesystem)
 
       :ok =
-        Agent.update(via(test), fn _state ->
-          {%{"/" => {%{"test.txt" => {"Hello World", %{}}}, %{}}}, %{}}
-        end)
+        Jido.VFS.write(filesystem, "test.txt", "Hello World")
 
       assert {:ok, stream} =
                Jido.VFS.Adapter.InMemory.read_stream(config, "test.txt", chunk_size: 3)
@@ -92,9 +79,7 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       start_supervised(filesystem)
 
       :ok =
-        Agent.update(via(test), fn _state ->
-          {%{"/" => {%{"test.txt" => {"Hello World", %{}}}, %{}}}, %{}}
-        end)
+        Jido.VFS.write(filesystem, "test.txt", "Hello World")
 
       {:ok, stream} = Jido.VFS.Adapter.InMemory.read_stream(config, "test.txt", chunk_size: 5)
       # Enum.count/1 falls back to reduce when count/1 returns error
@@ -107,9 +92,7 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       start_supervised(filesystem)
 
       :ok =
-        Agent.update(via(test), fn _state ->
-          {%{"/" => {%{"test.txt" => {"Hello World", %{}}}, %{}}}, %{}}
-        end)
+        Jido.VFS.write(filesystem, "test.txt", "Hello World")
 
       {:ok, stream} = Jido.VFS.Adapter.InMemory.read_stream(config, "test.txt", chunk_size: 5)
       # Enum.slice/3 falls back to reduce when slice/1 returns error
@@ -123,9 +106,7 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       start_supervised(filesystem)
 
       :ok =
-        Agent.update(via(test), fn _state ->
-          {%{"/" => {%{"test.txt" => {"Hello", %{}}}, %{}}}, %{}}
-        end)
+        Jido.VFS.write(filesystem, "test.txt", "Hello")
 
       {:ok, stream} = Jido.VFS.Adapter.InMemory.read_stream(config, "test.txt", [])
       # Enum.member?/2 falls back to reduce when member?/2 returns error
@@ -147,9 +128,7 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       start_supervised(filesystem)
 
       :ok =
-        Agent.update(via(test), fn _state ->
-          {%{"/" => {%{"test.txt" => {"Hello World", %{}}}, %{}}}, %{}}
-        end)
+        Jido.VFS.write(filesystem, "test.txt", "Hello World")
 
       {:ok, stream} = Jido.VFS.Adapter.InMemory.read_stream(config, "test.txt", chunk_size: 2)
 
@@ -213,20 +192,11 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       start_supervised(filesystem)
 
       :ok =
-        Agent.update(via(test), fn _state ->
-          {%{"/" => {%{"test.txt" => {"Hello World", %{}}}, %{}}}, %{}}
-        end)
+        Jido.VFS.write(filesystem, "test.txt", "Hello World")
 
       assert :ok = Jido.VFS.Adapter.InMemory.delete(config, "test.txt")
 
-      assert :error =
-               Agent.get(via(test), fn state ->
-                 state
-                 |> elem(0)
-                 |> Map.fetch!("/")
-                 |> elem(0)
-                 |> Map.fetch("test.txt")
-               end)
+      assert {:ok, :missing} = Jido.VFS.file_exists(filesystem, "test.txt")
     end
 
     test "successful even if no file to delete", %{test: test} do
@@ -483,9 +453,5 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
 
       assert {:ok, :missing} = Jido.VFS.file_exists(destination, "copied.txt")
     end
-  end
-
-  defp via(name) do
-    Jido.VFS.Registry.via(Jido.VFS.Adapter.InMemory, name)
   end
 end

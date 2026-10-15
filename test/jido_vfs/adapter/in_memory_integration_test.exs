@@ -18,10 +18,6 @@ defmodule Jido.VFS.Adapter.InMemoryIntegrationTest do
     {:ok, filesystem: filesystem, config: config, name: test}
   end
 
-  defp via(name) do
-    Jido.VFS.Registry.via(Jido.VFS.Adapter.InMemory, name)
-  end
-
   # ============================================================================
   # CORE OPERATIONS: Write/Read/Delete/Move/Copy
   # ============================================================================
@@ -1045,7 +1041,7 @@ defmodule Jido.VFS.Adapter.InMemoryIntegrationTest do
       end
     end
 
-    test "clear resets state completely", %{filesystem: fs, name: name} do
+    test "clear resets state completely", %{filesystem: fs} do
       :ok = Jido.VFS.write(fs, "file1.txt", "content")
       :ok = Jido.VFS.write(fs, "dir/file2.txt", "content")
 
@@ -1053,8 +1049,8 @@ defmodule Jido.VFS.Adapter.InMemoryIntegrationTest do
 
       :ok = Jido.VFS.clear(fs)
 
-      state = Agent.get(via(name), fn s -> s end)
-      assert state == {%{}, %{}, %{}}
+      {:ok, capture, _} = Jido.VFS.capture(fs)
+      assert capture.entries == %{}
 
       assert {:ok, :missing} = Jido.VFS.file_exists(fs, "file1.txt")
 
