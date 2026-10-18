@@ -15,7 +15,34 @@ defmodule JidoVfsTest.Minio do
     Logger.configure(level: :error)
 
     try do
-      {:ok, _pid} = MinioServer.start_link(config())
+      {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false])
+      {:ok, port} = :inet.port(socket)
+      :ok = :gen_tcp.close(socket)
+      suffix = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+      directory = Path.join(System.tmp_dir!(), "jido-vfs-minio-" <> suffix)
+      options = Keyword.put(config(), :port, port)
+      Application.put_env(:jido_vfs, :test_minio_config, options)
+
+      server_options =
+        options
+        |> Keyword.put(:minio_path, directory)
+        |> Keyword.put(:ui, false)
+        |> Keyword.delete(:console_address)
+
+      server_options =
+        case System.find_executable("minio") do
+          nil -> server_options
+          executable -> Keyword.put(server_options, :minio_executable, executable)
+        end
+
+      {:ok, pid} = MinioServer.start_link(server_options)
+
+      ExUnit.after_suite(fn _ ->
+        if Process.alive?(pid), do: Supervisor.stop(pid)
+        File.rm_rf!(directory)
+      end)
+
+      {:ok, pid}
     rescue
       exception in [MatchError] ->
         case exception.term do
@@ -38,15 +65,16 @@ defmodule JidoVfsTest.Minio do
   end
 
   def config do
-    [
+    Application.get_env(:jido_vfs, :test_minio_config,
       access_key_id: "minio_key",
       secret_access_key: "minio_secret",
+      http_client: ExAws.Request.Req,
       scheme: "http://",
       region: "local",
       host: "127.0.0.1",
       port: 9000,
       console_address: ":9001"
-    ]
+    )
   end
 
   def wait_for_ready(timeout \\ 5000) do
