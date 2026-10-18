@@ -1,4 +1,5 @@
 defmodule JidoVfsTest.Minio do
+  @moduledoc false
   def start_link do
     cur = Process.flag(:trap_exit, true)
 

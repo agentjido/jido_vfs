@@ -69,10 +69,10 @@ defmodule Jido.VFS.Adapter.GitHub do
   @impl Jido.VFS.Adapter
   def versioning_module, do: nil
 
-  alias Jido.VFS.Errors
   alias Jido.VFS.Adapter.GitHub.Client
-  alias Jido.VFS.Stat.File
+  alias Jido.VFS.Errors
   alias Jido.VFS.Stat.Dir
+  alias Jido.VFS.Stat.File
 
   defstruct [:owner, :repo, :ref, :client, :commit_info]
 

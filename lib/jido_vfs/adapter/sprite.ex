@@ -32,8 +32,8 @@ defmodule Jido.VFS.Adapter.Sprite do
 
   import Bitwise
 
-  alias Jido.VFS.Errors
   alias Jido.VFS.Adapter.Sprite.CommandTransport
+  alias Jido.VFS.Errors
   alias Jido.VFS.Stat.Dir
   alias Jido.VFS.Stat.File
 

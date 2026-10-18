@@ -43,9 +43,9 @@ defmodule Jido.VFS.Adapter.Local do
 
   """
   import Bitwise
-  alias Jido.VFS.Visibility.UnixVisibilityConverter
-  alias Jido.VFS.Visibility.PortableUnixVisibilityConverter, as: DefaultVisibilityConverter
   alias Jido.VFS.Errors
+  alias Jido.VFS.Visibility.PortableUnixVisibilityConverter, as: DefaultVisibilityConverter
+  alias Jido.VFS.Visibility.UnixVisibilityConverter
 
   defmodule Config do
     @moduledoc false

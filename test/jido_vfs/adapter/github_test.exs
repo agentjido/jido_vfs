@@ -5,7 +5,7 @@ defmodule Jido.VFS.Adapter.GitHubTest do
   alias Jido.VFS.Adapter.GitHub
   alias Jido.VFS.Adapter.GitHub.Client
   alias Jido.VFS.Adapter.InMemory
-  alias Jido.VFS.Stat.{File, Dir}
+  alias Jido.VFS.Stat.{Dir, File}
 
   @moduletag :github
 

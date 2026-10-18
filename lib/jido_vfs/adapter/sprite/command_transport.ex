@@ -3,8 +3,8 @@ defmodule Jido.VFS.Adapter.Sprite.CommandTransport do
   Helpers for executing and validating shell commands against a Sprite client.
   """
 
-  alias Jido.VFS.Errors
   alias Jido.VFS.Adapter.Sprite.Config
+  alias Jido.VFS.Errors
 
   @missing_marker "__JIDO_VFS_MISSING__"
 
