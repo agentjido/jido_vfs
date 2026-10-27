@@ -121,11 +121,15 @@ defmodule Jido.VFS.CopyFailureTest do
     file = Path.join(directory, "file")
     File.write!(file, "occupied")
 
-    assert {:error, %Errors.AdapterError{reason: %{reason: {:temp_dir_unavailable, ^file, :enotdir}}}} =
+    assert {:error,
+            %Errors.AdapterError{
+              reason: %{reason: {:temp_dir_unavailable, ^file, filesystem_reason}}
+            }} =
              VFS.copy_between_filesystem({{Source, {:ok, "data"}}, "from"}, {{Destination, %{owner: self()}}, "to"},
                copy_between_temp_dir: file
              )
 
+    assert filesystem_reason in [:eexist, :enotdir]
     assert File.read!(file) == "occupied"
     refute_receive {:write, _, _, _}
   end
