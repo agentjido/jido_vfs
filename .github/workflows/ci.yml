@@ -21,6 +21,6 @@ jobs:
     uses: agentjido/github-actions/.github/workflows/jido-ci.yml@v5
     secrets: inherit
     with:
-      credo_command: mix credo --min-priority higher
+      credo_command: mix credo --strict
       docs_command: mix docs -f html -f markdown
       test_command: mix test

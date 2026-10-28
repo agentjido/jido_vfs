@@ -149,7 +149,8 @@ Notes:
    ```
 
 2. **Coverage Requirements**
-   - Maintain high test coverage
+   - Keep application source coverage at 90% or more. The coverage check excludes
+     test support code. It includes all application source.
    - Test both success and error paths
    - Test async behavior where applicable
 
@@ -158,8 +159,11 @@ Notes:
    # Run full test suite
    mix test
 
-   # Run with coverage
-   mix coveralls
+   # Run the 90% coverage check, including local integration tests
+   mix coveralls --include integration
+
+   # Write a JSON report (this command does not enforce the coverage threshold)
+   mix coveralls.json --include integration
 
    # Run specific test file
    mix test test/jido_vfs/adapter/local_test.exs
@@ -170,6 +174,11 @@ Notes:
    # Include integration tests
    mix test --include integration
    ```
+
+   S3 tests use Minio. The test helper uses `minio` from `PATH` when available.
+   Otherwise, it uses the binary from `mix minio_server.download`. Each run uses
+   a separate temporary data directory and a free local port. The helper removes
+   the data directory after the test suite.
 
 ### Error Handling
 

@@ -1,4 +1,5 @@
 defmodule Jido.VFS.AdapterTest do
+  @moduledoc false
   defmacro in_list(list, match) do
     quote do
       Enum.any?(unquote(list), &match?(unquote(match), &1))

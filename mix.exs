@@ -43,7 +43,8 @@ defmodule Jido.VFS.MixProject do
       preferred_envs: [
         coveralls: :test,
         "coveralls.github": :test,
-        "coveralls.html": :test
+        "coveralls.html": :test,
+        "coveralls.json": :test
       ]
     ]
   end
@@ -95,7 +96,7 @@ defmodule Jido.VFS.MixProject do
       quality: [
         "format --check-formatted",
         "compile --warnings-as-errors",
-        "credo --min-priority higher",
+        "credo --strict",
         "dialyzer",
         "doctor --raise"
       ],
