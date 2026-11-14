@@ -1,15 +1,15 @@
 # Jido Agent Integration
 
-`jido_vfs` is the storage abstraction layer in the Jido ecosystem. It is intentionally kept lower-level than `jido_action` and `jido` so it can be used by libraries, services, shells, and agents without pulling in the full agent stack.
+`jido_vfs` is the storage abstraction layer in the Jido ecosystem. It is intentionally kept lower-level than consolidated `jido` so it can be used by libraries, services, shells, and agents without pulling in the full agent stack.
 
 ## Recommendation
 
-Do not make `jido_action` a required dependency of `jido_vfs`.
+Do not make `jido` a required dependency of `jido_vfs`.
 
 Reasons:
 
 - `jido_vfs` is useful outside agent runtimes.
-- Pulling `jido` and `jido_action` into the core package would widen the dependency surface significantly.
+- Adding consolidated `jido` to the VFS package would widen the dependency surface significantly.
 - Filesystem adapters and tool/action wrappers evolve at different rates.
 - Agent-safe defaults are policy decisions, not storage-abstraction concerns.
 
@@ -73,6 +73,9 @@ Alternative patterns that also work:
 - Resolve a named filesystem module that uses `Jido.VFS.Filesystem`.
 - Look up the adapter/config from application config for multi-tenant agents.
 
+The consuming application declares consolidated Jido as its dependency.
+Keep the Action wrapper in that application. VFS has no required Jido dependency.
+
 ## Example action wrapper
 
 ```elixir
@@ -80,9 +83,7 @@ defmodule MyApp.Actions.ReadFile do
   use Jido.Action,
     name: "read_file",
     description: "Read a file from the configured virtual filesystem",
-    schema: [
-      path: [type: :string, required: true, doc: "Relative path to read"]
-    ]
+    schema: Jido.Joi.object(%{path: Jido.Joi.string()})
 
   @impl true
   def run(params, %{filesystem: filesystem}) do
@@ -96,6 +97,6 @@ end
 
 ## Conclusion
 
-`jido_vfs` should support Jido agents well, but through composition rather than a hard dependency on `jido_action`.
+`jido_vfs` should support Jido agents well, but through composition rather than a hard dependency on `jido`.
 
 If the ecosystem wants a default tool pack, it should likely live next to this package, not inside its runtime core.
