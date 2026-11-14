@@ -100,3 +100,17 @@ end
 `jido_vfs` should support Jido agents well, but through composition rather than a hard dependency on `jido`.
 
 If the ecosystem wants a default tool pack, it should likely live next to this package, not inside its runtime core.
+
+## Executable v3 contract
+
+The check in `integration/jido_v3_contract.exs` compiles the exact Action
+example above. It reads a temporary local file through `Jido.Exec.run/3` and
+checks invalid input refusal. Run it from a consumer with both consolidated
+Jido and this VFS candidate:
+
+```sh
+MIX_ENV=test mix run /path/to/jido_vfs/integration/jido_v3_contract.exs
+```
+
+Use Workspace to check the Shell and VFS integration chain. VFS does not own
+Action schemas, agent routing, or host filesystem policy.

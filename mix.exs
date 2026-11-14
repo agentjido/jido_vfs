@@ -113,7 +113,7 @@ defmodule Jido.VFS.MixProject do
 
   defp package do
     [
-      files: ["lib", "docs", "mix.exs", "README.md", "LICENSE.md", "CHANGELOG.md", "usage-rules.md"],
+      files: ["lib", "docs", "integration", "mix.exs", "README.md", "LICENSE.md", "CHANGELOG.md", "usage-rules.md"],
       maintainers: ["AgentJido"],
       licenses: ["Apache-2.0"],
       links: %{
