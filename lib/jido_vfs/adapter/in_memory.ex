@@ -498,8 +498,7 @@ defmodule Jido.VFS.Adapter.InMemory do
         {:error, :directory_not_empty}
 
       {:ok, _} ->
-        {_, next} = pop_in(state, accessor(path))
-        {:ok, next}
+        {:ok, remove_working_entry(state, path)}
 
       error ->
         error
@@ -510,12 +509,18 @@ defmodule Jido.VFS.Adapter.InMemory do
     with {:ok, entry} <- fetch_entry(state, source),
          {:ok, _} <- fetch_directory(state, Path.dirname(destination)),
          {:error, :not_found} <- fetch_entry(state, destination) do
-      {_, next} = pop_in(state, accessor(source))
+      next = remove_working_entry(state, source)
       {:ok, put_in(next, accessor(destination), entry)}
     else
       {:ok, _} -> {:error, :already_exists}
       error -> error
     end
+  end
+
+  defp remove_working_entry({files, directories, versions}, path) do
+    [_state_accessor | entry_accessors] = accessor(path)
+    {_, files} = pop_in(files, entry_accessors)
+    {files, directories, versions}
   end
 
   defp fetch_directory(state, path) do
