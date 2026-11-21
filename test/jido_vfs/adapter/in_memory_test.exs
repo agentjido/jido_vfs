@@ -1,6 +1,7 @@
 defmodule Jido.VFS.Adapter.InMemoryTest do
   use ExUnit.Case, async: true
   import Jido.VFS.AdapterTest
+  alias Jido.VFS.Adapter.InMemory
   doctest Jido.VFS.Adapter.InMemory
 
   adapter_test %{test: test} do
@@ -28,6 +29,40 @@ defmodule Jido.VFS.Adapter.InMemoryTest do
       :ok = Jido.VFS.Adapter.InMemory.write(config, "folder/test.txt", "Hello World", [])
 
       assert {:ok, "Hello World"} = Jido.VFS.Adapter.InMemory.read(config, "folder/test.txt")
+    end
+  end
+
+  describe "working_file/3" do
+    test "serializes conditional writes against the current file", %{test: test} do
+      {_, config} = filesystem = InMemory.configure(name: test)
+      start_supervised!(filesystem)
+      assert :ok = InMemory.working_file(config, :write, ["file", "initial"])
+
+      check = fn
+        {:ok, "initial"} -> :ok
+        _ -> {:error, :stale_revision}
+      end
+
+      results =
+        ["first", "second"]
+        |> Task.async_stream(&InMemory.working_file(config, :write, ["file", &1, check]))
+        |> Enum.sort()
+
+      assert results == [{:ok, :ok}, {:ok, {:error, :stale_revision}}]
+      assert {:ok, winner} = InMemory.working_file(config, :read, ["file"])
+      assert winner in ["first", "second"]
+    end
+
+    test "leaves the tree and its revision unchanged when a write batch fails", %{test: test} do
+      {_, config} = filesystem = InMemory.configure(name: test)
+      start_supervised!(filesystem)
+      assert :ok = InMemory.working_file(config, :mkdir, ["directory"])
+      assert {:ok, capture, revision} = InMemory.capture(config)
+
+      assert {:error, :eisdir} =
+               InMemory.working_file(config, :write_many, [[{"file", "new"}, {"directory", "bad"}]])
+
+      assert {:ok, ^capture, ^revision} = InMemory.capture(config)
     end
   end
 

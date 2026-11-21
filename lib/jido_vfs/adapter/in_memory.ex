@@ -129,26 +129,33 @@ defmodule Jido.VFS.Adapter.InMemory do
 
   @impl Jido.VFS.Adapter
   def write(config, path, contents, opts) do
+    state_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+      put_file(state, path, contents, opts)
+    end)
+  end
+
+  defp put_file(state, path, contents, opts) do
     visibility = Keyword.get(opts, :visibility, :private)
     directory_visibility = Keyword.get(opts, :directory_visibility, :private)
     timestamp = System.system_time(:second)
 
-    state_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
-      if match?({children, _} when is_map(children), get_in(state, accessor(path))),
-        do: raise(ArgumentError, "path is a directory")
+    if match?({children, _} when is_map(children), get_in(state, accessor(path))),
+      do: raise(ArgumentError, "path is a directory")
 
-      old_meta =
-        case get_in(state, accessor(path)) do
-          {bytes, meta} when is_binary(bytes) -> meta
-          _ -> %{}
-        end
+    old_meta =
+      case get_in(state, accessor(path)) do
+        {bytes, meta} when is_binary(bytes) -> meta
+        _ -> %{}
+      end
 
-      mode = Keyword.get(opts, :mode, Map.get(old_meta, :mode, :regular))
-      unless mode in [:regular, :executable], do: raise(ArgumentError, "invalid mode")
-      file = {IO.iodata_to_binary(contents), %{visibility: visibility, mtime: timestamp, mode: mode}}
-      directory = {%{}, %{visibility: directory_visibility, mtime: timestamp}}
-      put_in(state, accessor(path, directory), file)
-    end)
+    mode = Keyword.get(opts, :mode, Map.get(old_meta, :mode, :regular))
+    unless mode in [:regular, :executable], do: raise(ArgumentError, "invalid mode")
+
+    file =
+      {IO.iodata_to_binary(contents), %{visibility: visibility, mtime: timestamp, mode: mode}}
+
+    directory = {%{}, %{visibility: directory_visibility, mtime: timestamp}}
+    put_in(state, accessor(path, directory), file)
   end
 
   @impl Jido.VFS.Adapter
@@ -271,19 +278,7 @@ defmodule Jido.VFS.Adapter.InMemory do
             _ -> %{}
           end
 
-        for {path, {content, meta}} <- paths do
-          struct =
-            case content do
-              %{} -> %Jido.VFS.Stat.Dir{size: 0}
-              bin when is_binary(bin) -> %Jido.VFS.Stat.File{size: byte_size(bin)}
-            end
-
-          struct!(struct,
-            name: path,
-            mtime: Map.get(meta, :mtime, 0),
-            visibility: meta.visibility
-          )
-        end
+        list_entries(paths)
       end)
 
     {:ok, contents}
@@ -367,6 +362,185 @@ defmodule Jido.VFS.Adapter.InMemory do
     intermediate_default = default || {%{}, %{}}
     do_accessor(rest, [Access.key(segment, intermediate_default), Access.elem(0) | acc], default)
   end
+
+  defp list_entries(paths) do
+    for {name, {content, meta}} <- paths do
+      entry =
+        case content do
+          %{} -> %Jido.VFS.Stat.Dir{size: 0}
+          bin when is_binary(bin) -> %Jido.VFS.Stat.File{size: byte_size(bin)}
+        end
+
+      %{entry | name: name, mtime: Map.get(meta, :mtime, 0), visibility: meta.visibility}
+    end
+  end
+
+  @doc """
+  Reads or edits the working tree with a single adapter operation.
+
+  Use relative paths and `"."` for the root when reading a directory.
+  The adapter applies a write batch in full or leaves the tree unchanged.
+  A conditional write checks the current file in the same transaction.
+  The check function must return `:ok` or `{:error, reason}`.
+  """
+  def working_file(config, :read, [path]) do
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+      read_working_file(state, path)
+    end)
+  end
+
+  def working_file(config, :read, [path, limit]) do
+    case working_file(config, :read, [path]) do
+      {:ok, bytes} when byte_size(bytes) > limit -> {:error, :discovery_byte_limit}
+      result -> result
+    end
+  end
+
+  def working_file(config, :read, [path, offset, count]) do
+    case working_file(config, :read, [path]) do
+      {:ok, bytes} when offset >= byte_size(bytes) ->
+        {:ok, ""}
+
+      {:ok, bytes} ->
+        chunk = binary_part(bytes, offset, min(count, byte_size(bytes) - offset))
+        {:ok, :binary.copy(chunk)}
+
+      error ->
+        error
+    end
+  end
+
+  def working_file(config, :upload_target, [path]) do
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+      with {:ok, _} <- fetch_directory(state, Path.dirname(path)) do
+        case fetch_entry(state, path) do
+          {:ok, {children, _}} when is_map(children) -> {:error, :eisdir}
+          _ -> :ok
+        end
+      end
+    end)
+  end
+
+  def working_file(config, :list, [path]), do: working_file(config, :list, [path, :infinity])
+
+  def working_file(config, :list, [path, limit]) do
+    state_get(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+      case fetch_directory(state, path) do
+        {:ok, {children, _}} when limit == :infinity or map_size(children) <= limit ->
+          {:ok, list_entries(children)}
+
+        {:ok, _} ->
+          {:error, :discovery_entry_limit}
+
+        error ->
+          error
+      end
+    end)
+  end
+
+  def working_file(config, operation, args)
+      when operation in [:write, :write_many, :mkdir, :delete, :move] do
+    state_get_and_update(Jido.VFS.Registry.via(__MODULE__, config.name), fn state ->
+      case edit_working_tree(state, operation, args) do
+        {:ok, next} -> {:ok, next}
+        {:error, _} = error -> {error, state}
+      end
+    end)
+  end
+
+  defp read_working_file(state, path) do
+    case fetch_entry(state, path) do
+      {:ok, {bytes, _}} when is_binary(bytes) -> {:ok, bytes}
+      {:ok, _} -> {:error, :eisdir}
+      error -> error
+    end
+  end
+
+  defp edit_working_tree(state, :write, [path, bytes, check]) do
+    with :ok <- check.(read_working_file(state, path)),
+         do: {:ok, put_file(state, path, bytes, [])}
+  end
+
+  defp edit_working_tree(state, :write, [path, bytes]) do
+    case fetch_entry(state, path) do
+      {:ok, {children, _}} when is_map(children) -> {:error, :eisdir}
+      {:error, :not_directory} = error -> error
+      _ -> {:ok, put_file(state, path, bytes, [])}
+    end
+  end
+
+  defp edit_working_tree(state, :write_many, [files]) do
+    Enum.reduce_while(files, {:ok, state}, fn {path, bytes}, {:ok, tree} ->
+      case edit_working_tree(tree, :write, [path, bytes]) do
+        {:ok, _} = result -> {:cont, result}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp edit_working_tree(state, :mkdir, [path]) do
+    case fetch_directory(state, path) do
+      {:ok, _} ->
+        {:ok, state}
+
+      {:error, :not_found} ->
+        directory = {%{}, %{visibility: :private, mtime: System.system_time(:second)}}
+        {:ok, put_in(state, accessor(path, directory), directory)}
+
+      error ->
+        error
+    end
+  end
+
+  defp edit_working_tree(state, :delete, [path]) do
+    case fetch_entry(state, path) do
+      {:ok, {children, _}} when is_map(children) and map_size(children) > 0 ->
+        {:error, :directory_not_empty}
+
+      {:ok, _} ->
+        {_, next} = pop_in(state, accessor(path))
+        {:ok, next}
+
+      error ->
+        error
+    end
+  end
+
+  defp edit_working_tree(state, :move, [source, destination]) do
+    with {:ok, entry} <- fetch_entry(state, source),
+         {:ok, _} <- fetch_directory(state, Path.dirname(destination)),
+         {:error, :not_found} <- fetch_entry(state, destination) do
+      {_, next} = pop_in(state, accessor(source))
+      {:ok, put_in(next, accessor(destination), entry)}
+    else
+      {:ok, _} -> {:error, :already_exists}
+      error -> error
+    end
+  end
+
+  defp fetch_directory(state, path) do
+    case fetch_entry(state, path) do
+      {:ok, {children, _}} = result when is_map(children) -> result
+      {:ok, _} -> {:error, :not_directory}
+      error -> error
+    end
+  end
+
+  defp fetch_entry({files, _, _}, path) do
+    root = Map.get(files, "/", {%{}, %{}})
+    lookup(root, if(path == ".", do: [], else: String.split(path, "/")))
+  end
+
+  defp lookup(entry, []), do: {:ok, entry}
+
+  defp lookup({children, _}, [part | rest]) when is_map(children) do
+    case Map.fetch(children, part) do
+      {:ok, entry} -> lookup(entry, rest)
+      :error -> {:error, :not_found}
+    end
+  end
+
+  defp lookup(_, _), do: {:error, :not_directory}
 
   # Versioning implementation
 
