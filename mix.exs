@@ -62,8 +62,8 @@ defmodule Jido.VFS.MixProject do
   defp deps do
     [
       # Runtime dependencies
-      {:ex_aws, "~> 2.7"},
-      {:ex_aws_s3, "~> 2.2"},
+      {:ex_aws, "~> 2.8"},
+      {:ex_aws_s3, "~> 2.6"},
       {:sweet_xml, "~> 0.6"},
       {:jason, "~> 1.0"},
       {:eternal, "~> 1.2.2"},
